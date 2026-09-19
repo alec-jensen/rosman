@@ -2,6 +2,70 @@
 
 Tracking status against the phased build order in [`spec.md`](spec.md) §10.
 
+## Windows hardware live verification: WSLg GUI + usbipd (2026-09-19)
+
+Closed the two remaining unverified Windows items from the prior round, both
+against real hardware on the same Windows 11 machine (WSL2 Ubuntu 24.04 +
+Docker Desktop, WSL integration enabled for that distro).
+
+**WSLg GUI passthrough — confirmed working, no bugs found.** Built a test
+workspace with `x11-apps` via `extra_apt_packages`, ran `rosman up` from
+*inside* WSL2 (required for `is_wsl2()` to detect it), and confirmed via
+`docker inspect` that rosman correctly took the WSL2 branch: only
+`/tmp/.X11-unix` and `/mnt/wslg` were bind-mounted (no XAuth cookie
+generated — the Linux X11 logic was correctly skipped). Launched `xeyes`
+inside the container and verified with a small Xlib script querying the
+real WSLg X server directly that a genuine, mapped/viewable top-level
+window appeared at the moment `xeyes` started and disappeared the moment it
+was killed — proof of an actual window, not just a process that didn't
+error.
+
+**usbipd-win device attach — confirmed working, but found and fixed a real
+bug in `devices:` passthrough (not Windows-specific).** Installed
+usbipd-win, bound and attached a real USB mass storage device to WSL2,
+declared it in `rosman.yml`'s `devices:`, and confirmed `rosman doctor`
+correctly reports it visible once attached (and gives the documented
+BUSID/bind/attach hint beforehand). `rosman up` correctly passed the
+device through to the container (`lsblk` showed it) — but reading it
+failed with "Permission denied" for the container's default non-root user.
+Root cause: `--device` only grants cgroup-level access to the node; the
+node's own Unix permissions (owner `root`, group `disk`/`dialout`/etc.,
+mode `0660` — standard for block/serial/video devices on Linux) still
+blocked a user with no matching group membership, and nothing in
+`create_container` ever granted one. This wasn't caught by any prior round
+(including the earlier live-Docker verification with a real GPU) because
+those never exercised `devices:` against an actual device with restrictive
+permissions. Fixed in `rosman/lifecycle.py`:
+- Added `DEVICE_GROUPS` (`dialout`, `video`, `audio`, `plugdev`, `disk`,
+  `tty`, `uucp` — the standard Debian/Ubuntu groups that own hardware
+  device nodes) and pass it to `containers.create(group_add=...)` whenever
+  `devices:` is non-empty. This is a runtime property, not baked into the
+  image, so it isn't affected by `--user`/host-UID matching.
+- `render_dockerfile` now defensively creates whichever of those groups
+  don't already exist, so this works even against a minimal `base_image`
+  override that might be missing one (e.g. `plugdev`), not just the stock
+  `ros:<distro>` image. `DOCKERFILE_TEMPLATE_VERSION` bumped to 6 so
+  existing cached images get rebuilt and pick this up.
+- **Live-verified the fix**: rebuilt the image, reattached the same USB
+  device, and confirmed the container's default user now has
+  `disk`/`dialout`/etc. as supplementary groups and can read the device
+  directly with no `sudo` needed.
+
+Also encountered, unrelated to rosman itself: Docker Desktop's WSL
+integration socket flapped a few times mid-session for reasons outside
+rosman's control (once from a `wsl --terminate` during debugging, once
+from what looked like a Docker Desktop self-update) — a good reminder that
+`rosman doctor`'s existing "Docker Desktop running with WSL2 backend
+enabled" hint is about as specific as it can usefully be; the actual
+underlying cause of a dead socket varies and isn't something rosman can
+diagnose further. Separately, `doctor.py::_usbipd_hint`'s
+`shutil.which("usbipd.exe")` lookup can fail to find a genuinely-installed
+usbipd if WSL2's Windows-PATH interop is stale for whatever reason (seen
+in this session); not fixed here since it self-resolves with a normal
+fresh terminal in the common case, but worth revisiting if it turns out to
+bite real users, e.g. by also checking the winget default install path
+(`/mnt/c/Program Files/usbipd-win/usbipd.exe`) as a fallback.
+
 ## Windows live verification (2026-09-19)
 
 Ran `rosman` for real on a Windows 11 machine, both from native Windows
@@ -47,9 +111,11 @@ table/box-drawing output (which looked garbled through this session's
 non-UTF-8 shell) renders correctly in a real PowerShell/Windows Terminal
 session — not a rosman bug, just a UTF-8 console requirement.
 
-Not yet live-verified: WSL2 GUI passthrough against a real X/WSLg session,
-`usbipd` device attach against real hardware, and `rosman doctor
---network-check` from native Windows (only exercised from Linux so far).
+WSL2 GUI passthrough and `usbipd` device attach against real hardware were
+live-verified in a follow-up round — see "Windows hardware live
+verification" above (the latter surfaced a real `devices:` permissions bug,
+now fixed). Still not live-verified: `rosman doctor --network-check` from
+native Windows (only exercised from Linux so far).
 
 ## Live verification (2026-09-19)
 
@@ -184,10 +250,11 @@ without any live verification at all are WSLg GUI passthrough and
   `usbipd-win` guidance in `rosman doctor`: shells out to `usbipd list` (or
   `usbipd.exe list` from WSL2) when available and prints the BUSID listing
   alongside the bind/attach commands; falls back to generic install
-  instructions if `usbipd` isn't found on PATH. The core Windows workflow
-  (not GUI/device-specific) is live-verified — see "Windows live
-  verification" above — but WSLg GUI passthrough and `usbipd` device
-  attach specifically are not yet tested against real Windows hardware.
+  instructions if `usbipd` isn't found on PATH. **Live-verified 2026-09-19**
+  — see "Windows hardware live verification" above: a real `xeyes` window
+  through WSLg, and a real USB device attached via usbipd, visible in the
+  container and (after fixing a real permissions bug) actually readable by
+  its default user.
 - One documented limitation: rosman only wires up the X11/GPU *plumbing*.
   It does not install GUI packages (rviz2, rqt, Gazebo) into the per-
   workspace image — that's what `extra_apt_packages` in `rosman.yml` is
