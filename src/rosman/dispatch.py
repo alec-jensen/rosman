@@ -14,6 +14,7 @@ because it *is* the same code path `docker exec -it` always uses.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import sys
 from pathlib import Path
@@ -49,12 +50,16 @@ def _docker_binary() -> str:
 
 
 def _exec_argv(container: str, workdir: str, command: list[str]) -> list[str]:
-    interactive = sys.stdin.isatty()
-    flags = "-i" if interactive else ""
-    flags += "t" if sys.stdout.isatty() else ""
-    argv = [_docker_binary(), "exec"]
-    if flags:
-        argv.append(f"-{flags}")
+    # -i (keep stdin open) is safe and correct even when stdin isn't a TTY --
+    # e.g. `some_script | rosman shell` piping commands in -- and dropping it
+    # in that case silently produces a `docker exec` with no stdin attached
+    # at all, discarding the piped input entirely. -t (allocate a pseudo-TTY)
+    # is the one that actually requires a real terminal on both ends, and
+    # docker errors ("the input device is not a TTY") if forced without one.
+    flags = "-i"
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        flags += "t"
+    argv = [_docker_binary(), "exec", flags]
     argv += ["-w", workdir, container, *command]
     return argv
 
@@ -77,6 +82,13 @@ def dispatch_passthrough(args: list[str], container_name: str, workdir: str) -> 
 
     `rosman colcon build` -> `docker exec ... colcon build`
     anything else        -> `docker exec ... ros2 <args>`
+
+    Routed through `bash -lc "<command>"` (a login shell), not run as a
+    bare argv, because `ros2`/`colcon` only end up on $PATH once
+    `/opt/ros/<distro>/setup.bash` is sourced -- the image bakes that into
+    `/etc/profile.d/rosman-ros.sh`, which only login shells read. A plain
+    `docker exec container ros2 ...` gets a fresh, un-sourced environment
+    and fails with "ros2: executable file not found in $PATH".
     """
     if not args:
         raise RosmanError("No command given. Run `rosman --help` for usage.")
@@ -84,8 +96,10 @@ def dispatch_passthrough(args: list[str], container_name: str, workdir: str) -> 
         command = list(args)
     else:
         command = ["ros2", *args]
-    return exec_in_container(container_name, workdir, command)
+    return exec_in_container(container_name, workdir, ["bash", "-lc", shlex.join(command)])
 
 
 def shell_command(container_name: str, workdir: str, shell: str = "bash") -> int:
-    return exec_in_container(container_name, workdir, [shell])
+    """Drop into an interactive login shell, so the same `/etc/profile.d`
+    ROS sourcing that `dispatch_passthrough` relies on applies here too."""
+    return exec_in_container(container_name, workdir, [shell, "-l"])

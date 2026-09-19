@@ -41,6 +41,14 @@ CONTAINER_WORKSPACE_PATH = "/workspace"
 DEFAULT_USERNAME = "rosman"
 SETUP_SCRIPT_CONTAINER_NAME = "rosman-setup.sh"
 
+# Bump whenever render_dockerfile changes in a way that affects the built
+# image (a new apt package, a fixed bug like the /etc/profile.d ROS sourcing
+# fix). Config-hash inputs otherwise only cover *user-facing* rosman.yml
+# fields, so without this a rosman upgrade that fixes something in the
+# template would silently leave existing users on their old, buggy cached
+# image forever -- `rosman up` would just find the old tag and reuse it.
+DOCKERFILE_TEMPLATE_VERSION = 3
+
 # Ubuntu codename ROS 2 apt packages are published under for each distro, used
 # only when `base_image` overrides the default `ros:<distro>` image and rosman
 # has to apt-install ROS 2 onto an arbitrary base itself (spec extension:
@@ -90,6 +98,7 @@ def compute_config_hash(config: RosmanConfig, uid: int, gid: int) -> str:
     without re-parsing anything."""
     payload = "|".join(
         [
+            str(DOCKERFILE_TEMPLATE_VERSION),
             config.ros_distro,
             config.rmw_implementation,
             ",".join(sorted(config.extra_apt_packages)),
@@ -144,6 +153,16 @@ def render_dockerfile(config: RosmanConfig, uid: int, gid: int) -> str:
     install_extra = f" {extra_packages}" if extra_packages else ""
     ros_install_block = _render_ros_install_block(config)
 
+    # Built as plain Python strings (not inline in the Dockerfile f-string
+    # below) specifically so each can stay a single, unbroken shell string
+    # regardless of how long the substituted paths are -- see the regression
+    # test for _render_ros_install_block: breaking a *quoted* shell string
+    # across Dockerfile continuation lines corrupts it with stray whitespace.
+    ros_setup_path = f"/opt/ros/{config.ros_distro}/setup.bash"
+    ws_setup_path = f"{CONTAINER_WORKSPACE_PATH}/install/setup.bash"
+    ros_profile_line = f"[ -f {ros_setup_path} ] && . {ros_setup_path}"
+    ws_profile_line = f"[ -f {ws_setup_path} ] && . {ws_setup_path}"
+
     setup_block = ""
     if config.setup_script:
         # Run as the rosman user, not root: installers that write into the
@@ -174,8 +193,31 @@ RUN (getent group $USER_GID || groupadd --gid $USER_GID $USERNAME) \\
     && chmod 0440 /etc/sudoers.d/$USERNAME \\
     && rm -rf /var/lib/apt/lists/*
 
+# build/install/log are mounted as named volumes (see naming.py::volume_name),
+# not part of the workspace bind mount -- a fresh named volume is empty, and
+# Docker only inherits the *image's* ownership/permissions at that path into
+# it on first mount. Without pre-creating these owned by the rosman user, the
+# volumes come up root-owned and every `colcon build` fails with EACCES.
+RUN mkdir -p {CONTAINER_WORKSPACE_PATH}/build {CONTAINER_WORKSPACE_PATH}/install \\
+        {CONTAINER_WORKSPACE_PATH}/log \\
+    && chown -R $USER_UID:$USER_GID {CONTAINER_WORKSPACE_PATH}
+
 ENV RMW_IMPLEMENTATION={RMW_IMPLEMENTATION_ENV}
 ENV RCUTILS_COLORIZED_OUTPUT=1
+ENV ROS_DISTRO={config.ros_distro}
+
+# `ros2`/colcon overlay setup only takes effect once setup.bash is sourced,
+# and that's a per-shell action, not a static PATH -- the ros:<distro>
+# image's own ENTRYPOINT sources it for the container's main process, but
+# `docker exec` sessions get a fresh environment and never see it. rosman
+# always runs commands through a login shell (`bash -lc`/`bash -l`, see
+# dispatch.py), so putting the sourcing in /etc/profile.d makes every
+# ros2/colcon passthrough call and `rosman shell` pick it up automatically.
+RUN printf '%s\\n' \\
+        "{ros_profile_line}" \\
+        "{ws_profile_line}" \\
+        > /etc/profile.d/rosman-ros.sh \\
+    && chmod +x /etc/profile.d/rosman-ros.sh
 {setup_block}
 WORKDIR {CONTAINER_WORKSPACE_PATH}
 """
