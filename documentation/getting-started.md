@@ -97,9 +97,12 @@ rosman rebuild # force-recreate it (e.g. after changing rosman.yml)
 
 Anything that isn't one of rosman's own subcommands (`init`, `up`, `down`,
 `status`, `rebuild`, `doctor`, `shell`, `push`, `completion`, `help`) is
-forwarded verbatim as `ros2 <args>` (or `colcon <args>` if the first word
-is `colcon`) inside the workspace container — rosman does not reimplement
-the `ros2` CLI.
+forwarded verbatim as `ros2 <args>` (or `colcon <args>`/`rosdep <args>` if
+the first word is `colcon`/`rosdep`) inside the workspace container —
+rosman does not reimplement the `ros2` CLI. Cloning source packages into
+`src/`? See [Building from source](guides/rosdep-lockfile.md) for
+`rosman rosdep install` before you hit a missing-dependency error at
+runtime.
 
 Next: turn on [tab-completion](guides/tab-completion.md), skim the
 [configuration reference](configuration.md), or jump straight to

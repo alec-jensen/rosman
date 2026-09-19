@@ -631,3 +631,43 @@ Net result, measured the same way: ~640ms -> ~550-570ms total per
 completion. The remaining time is essentially all `ros2`'s own CLI
 startup, correctly outside rosman's control -- set this expectation with
 Alec directly rather than overpromising a "fast" result.
+
+## rosdep + rosman.lock (2026-09-19, v0.1.3)
+
+Real user report, first real from-source build after v0.1.0: `rosman
+colcon build` succeeded for a cloned `demo_nodes_py`, `rosman run
+demo_nodes_py talker` then failed with `ModuleNotFoundError:
+example_interfaces` -- a real declared dependency not part of `ros-base`.
+Gave the immediate two fixes (a one-off `sudo apt install` and an
+`extra_apt_packages` entry), then Alec asked the bigger question: "should
+we have some sort of lockfile that makes it easy for rosman to keep track
+of environment changes?" Full design in spec.md's fifth addendum;
+summary:
+
+- Default image now installs `python3-rosdep` + runs `rosdep init`/`rosdep
+  update` at build time.
+- `rosman rosdep install` resolves apt deps from workspace `src/`
+  packages, installs them into the running container *immediately*
+  (usable right away, no rebuild wait), and writes `rosman.lock` -- a new
+  auto-generated, git-checked-in file recording `ros_distro` + the
+  resolved package list, folded into the image build and config-hash
+  exactly like `extra_apt_packages`. Every other `rosdep` subcommand is
+  plain passthrough like `colcon`.
+- Real bug caught only by testing against an actual container: the real
+  (non-simulate) `rosdep install` failed with "Unable to locate package"
+  because the image strips `/var/lib/apt/lists/*` after its own build,
+  and rosdep doesn't run `apt-get update` itself first. `--simulate`
+  never touches apt, so this was invisible until the *real* install was
+  tested specifically -- fixed by prefixing `sudo apt-get update &&`.
+- Verified rosdep's actual `--simulate` output format empirically (one
+  `sudo -H apt-get install -y <pkg>` line per package) against a real
+  container with a hand-crafted test `package.xml`, rather than assuming
+  it from memory, before writing the parser.
+- Live-verified full loop end to end: `rosman rosdep install` resolved
+  and installed `ros-humble-example-interfaces` + `ros-humble-turtlesim`
+  into a real running container, wrote a correct `rosman.lock`, the
+  packages were immediately importable without a rebuild, and `rosman
+  rebuild` correctly baked them into the rebuilt image (verified by
+  importing both packages again in the freshly rebuilt container). Also
+  verified the `rosman.yml`/`rosman.lock` distro-mismatch config error
+  fires correctly.

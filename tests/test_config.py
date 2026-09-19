@@ -7,8 +7,10 @@ from rosman.config import (
     find_config_file,
     load_config,
     local_override_path,
+    lock_path,
     parse_config,
     resolve_config,
+    write_lock,
 )
 
 MINIMAL = "ros_distro: humble\n"
@@ -312,3 +314,55 @@ def test_resolve_config_applies_local_override(tmp_path: Path):
     config = resolve_config(tmp_path)
 
     assert config.domain_id == 42
+
+
+def test_lock_path_is_always_rosman_lock(tmp_path: Path):
+    assert lock_path(tmp_path / "rosman.yml") == tmp_path / "rosman.lock"
+    assert lock_path(tmp_path / ".rosman.yaml") == tmp_path / "rosman.lock"
+
+
+def test_no_lockfile_means_empty_locked_packages(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    path.write_text(MINIMAL)
+
+    config = load_config(path)
+
+    assert config.locked_apt_packages == []
+
+
+def test_write_lock_then_load_config_reads_it_back(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    path.write_text(MINIMAL)
+    write_lock(path, "humble", ["ros-humble-example-interfaces", "ros-humble-turtlesim"])
+
+    config = load_config(path)
+
+    assert config.locked_apt_packages == ["ros-humble-example-interfaces", "ros-humble-turtlesim"]
+
+
+def test_write_lock_sorts_and_dedupes(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    path.write_text(MINIMAL)
+    write_lock(path, "humble", ["b-pkg", "a-pkg", "a-pkg"])
+
+    config = load_config(path)
+
+    assert config.locked_apt_packages == ["a-pkg", "b-pkg"]
+
+
+def test_lock_distro_mismatch_is_a_config_error(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    path.write_text("ros_distro: jazzy\n")
+    write_lock(path, "humble", ["ros-humble-example-interfaces"])
+
+    with pytest.raises(ConfigError, match="rosman rosdep install"):
+        load_config(path)
+
+
+def test_malformed_lock_apt_packages_is_a_config_error(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    path.write_text(MINIMAL)
+    (tmp_path / "rosman.lock").write_text("ros_distro: humble\napt_packages: not-a-list\n")
+
+    with pytest.raises(ConfigError, match="apt_packages"):
+        load_config(path)

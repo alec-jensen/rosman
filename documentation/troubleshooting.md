@@ -48,6 +48,14 @@ process touches it; this is handled automatically on a normal `rosman up`,
 but a manual `docker` interaction with the same volume outside of rosman
 can leave it in a state rosman doesn't expect.
 
+**`colcon build` succeeds for a package cloned into `src/`, but running it
+fails with a `ModuleNotFoundError` for another ROS package.** The package
+declares a dependency that isn't part of the default image — `colcon
+build` doesn't fail just because a pure-Python runtime import will later
+be missing. Run `rosman rosdep install` to resolve and install it (and
+lock it into `rosman.yml`'s built image via `rosman rebuild`) — see
+[Building from source](guides/rosdep-lockfile.md).
+
 **`ros2 topic list`/GUI apps don't show anything from another rosman
 project.** Confirm both projects use the same `network:` group in their
 `rosman.yml` — only projects in the same group can discover each other.

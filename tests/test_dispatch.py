@@ -79,6 +79,19 @@ def test_dispatch_passthrough_colcon_is_not_prefixed_with_ros2(monkeypatch):
     assert captured["command"] == ["bash", "-lc", "colcon build"]
 
 
+def test_dispatch_passthrough_rosdep_is_not_prefixed_with_ros2(monkeypatch):
+    # `rosman rosdep install` specifically is intercepted earlier (in
+    # cli.main, before dispatch_passthrough is ever reached) -- but every
+    # other rosdep subcommand, e.g. `update`/`check`, is plain passthrough
+    # exactly like colcon.
+    captured = {}
+    monkeypatch.setattr(
+        dispatch, "exec_in_container", lambda c, w, cmd: captured.setdefault("command", cmd)
+    )
+    dispatch_passthrough(["rosdep", "update"], "my-container", "/workspace")
+    assert captured["command"] == ["bash", "-lc", "rosdep update"]
+
+
 def test_dispatch_passthrough_quotes_arguments_safely(monkeypatch):
     captured = {}
     monkeypatch.setattr(

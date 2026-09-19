@@ -30,6 +30,7 @@ is not supported.
   first workspace.
 - **[Configuration](configuration.md)** — the full `rosman.yml` reference.
 - **Guides** — [custom base images](guides/custom-images.md),
+  [building from source (rosdep + lock)](guides/rosdep-lockfile.md),
   [team-shared images](guides/team-images.md),
   [multi-host over LAN](guides/multi-host.md),
   [shell tab-completion](guides/tab-completion.md), and

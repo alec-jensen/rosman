@@ -82,7 +82,7 @@ DEVICE_GROUPS = ["dialout", "video", "audio", "plugdev", "disk", "tty", "uucp"]
 # fields, so without this a rosman upgrade that fixes something in the
 # template would silently leave existing users on their old, buggy cached
 # image forever -- `rosman up` would just find the old tag and reuse it.
-DOCKERFILE_TEMPLATE_VERSION = 6
+DOCKERFILE_TEMPLATE_VERSION = 7
 
 # Ubuntu codename ROS 2 apt packages are published under for each distro, used
 # only when `base_image` overrides the default `ros:<distro>` image and rosman
@@ -143,6 +143,7 @@ def compute_config_hash(config: RosmanConfig) -> str:
             config.ros_distro,
             config.rmw_implementation,
             ",".join(sorted(config.extra_apt_packages)),
+            ",".join(sorted(config.locked_apt_packages)),
             config.base_image or "",
             config.setup_script or "",
             _setup_script_digest(config),
@@ -219,7 +220,12 @@ RUN printf '%s\\n' \\
 
 def render_dockerfile(config: RosmanConfig) -> str:
     base = config.base_image or f"ros:{config.ros_distro}"
-    extra_packages = " ".join(config.extra_apt_packages)
+    # `locked_apt_packages` (from rosman.lock, see rosdep.py) are folded in
+    # alongside `extra_apt_packages` -- same install line, just a different
+    # source (rosdep-resolved vs. hand-listed), deduped since a package
+    # could plausibly appear in both.
+    all_packages = sorted(set(config.extra_apt_packages) | set(config.locked_apt_packages))
+    extra_packages = " ".join(all_packages)
     install_extra = f" {extra_packages}" if extra_packages else ""
     ros_install_block = _render_ros_install_block(config)
 
@@ -269,11 +275,13 @@ RUN (getent group {IMAGE_GID} || groupadd --gid {IMAGE_GID} {DEFAULT_USERNAME}) 
         || groupadd --system "$grp"; done) \\
     && apt-get update \\
     && apt-get install -y --no-install-recommends \\
-        sudo python3-colcon-common-extensions \\
+        sudo python3-colcon-common-extensions python3-rosdep \\
         ros-{config.ros_distro}-rmw-cyclonedds-cpp{install_extra} \\
     && echo "ALL ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/rosman \\
     && chmod 0440 /etc/sudoers.d/rosman \\
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \\
+    && (rosdep init || true) \\
+    && su -l {DEFAULT_USERNAME} -c "rosdep update"
 
 # Everything below is world-writable/-readable rather than owned by a
 # specific UID: the image's baked identity ({IMAGE_UID}:{IMAGE_GID}) is

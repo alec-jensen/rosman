@@ -293,6 +293,47 @@ def cmd_push(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rosdep_install(extra_args: list[str]) -> int:
+    """`rosman rosdep install` -- the one rosdep subcommand that isn't
+    plain passthrough (see rosdep.py's module docstring for why): resolves
+    apt-level deps declared by workspace `src/` packages, installs them
+    into the running container immediately, and writes rosman.lock so
+    they're baked into the image on the next `rosman rebuild` and shared
+    with the rest of the team via git.
+    """
+    from rosman.docker_client import get_client
+    from rosman.lifecycle import ContainerManager
+    from rosman.rosdep import install_packages, resolve_packages
+
+    config = _load_config_or_exit()
+    client = get_client()
+    state = RosmanState.load()
+    manager = ContainerManager(client, state)
+    container, _ = _ensure_running_with_notice(manager, config)
+
+    console.print("Resolving dependencies declared under src/ via rosdep...")
+    packages = resolve_packages(container, extra_args)
+    if not packages:
+        console.print("Nothing to install -- all declared dependencies are already satisfied.")
+        return 0
+
+    console.print(f"Installing: {', '.join(packages)}")
+    exit_code, output = install_packages(container, extra_args)
+    if exit_code != 0:
+        err_console.print(f"[red]rosdep install failed inside the container:[/red]\n{output}")
+        return exit_code
+
+    from rosman.config import write_lock
+
+    write_lock(config.config_path, config.ros_distro, packages)
+    console.print(
+        f"[green]Wrote[/green] {len(packages)} package(s) to rosman.lock. "
+        "Run `rosman rebuild` to bake them into the image (and check "
+        "rosman.lock into git so your team gets them too)."
+    )
+    return 0
+
+
 def cmd_completion(args: argparse.Namespace) -> int:
     script = BASH_SCRIPT if args.shell == "bash" else ZSH_SCRIPT
     print(script, end="")
@@ -441,6 +482,20 @@ def main(argv: list[str] | None = None) -> int:
     _maybe_show_update_notice()
 
     from docker.errors import DockerException
+
+    if argv[:2] == ["rosdep", "install"]:
+        # The one rosdep subcommand that isn't plain passthrough -- see
+        # rosdep.py's module docstring. Every other `rosman rosdep <...>`
+        # falls through to the generic passthrough branch below, exactly
+        # like `colcon`.
+        try:
+            return cmd_rosdep_install(argv[2:])
+        except RosmanError as exc:
+            err_console.print(f"[red]{exc}[/red]")
+            return 1
+        except DockerException as exc:
+            err_console.print(f"[red]Docker error:[/red] {exc}")
+            return 1
 
     if argv and argv[0] not in RESERVED_COMMANDS and not argv[0].startswith("-"):
         try:

@@ -100,11 +100,17 @@ def exec_in_container(container_name: str, workdir: str, command: list[str]) -> 
 def dispatch_passthrough(args: list[str], container_name: str, workdir: str) -> int:
     """Forward a non-reserved `rosman <args>` call into the container.
 
-    `rosman colcon build` -> `docker exec ... colcon build`
-    anything else        -> `docker exec ... ros2 <args>`
+    `rosman colcon build`  -> `docker exec ... colcon build`
+    `rosman rosdep update` -> `docker exec ... rosdep update`
+    anything else          -> `docker exec ... ros2 <args>`
+
+    (`rosman rosdep install` specifically is intercepted earlier, in
+    cli.main, before it ever reaches here -- it needs to also write
+    rosman.lock, which a process-replacing exec can't do anything after.
+    Every other rosdep subcommand is plain passthrough like this.)
 
     Routed through `bash -lc "<command>"` (a login shell), not run as a
-    bare argv, because `ros2`/`colcon` only end up on $PATH once
+    bare argv, because `ros2`/`colcon`/`rosdep` only end up on $PATH once
     `/opt/ros/<distro>/setup.bash` is sourced -- the image bakes that into
     `/etc/profile.d/rosman-ros.sh`, which only login shells read. A plain
     `docker exec container ros2 ...` gets a fresh, un-sourced environment
@@ -112,7 +118,7 @@ def dispatch_passthrough(args: list[str], container_name: str, workdir: str) -> 
     """
     if not args:
         raise RosmanError("No command given. Run `rosman --help` for usage.")
-    if args[0] == "colcon":
+    if args[0] in ("colcon", "rosdep"):
         command = list(args)
     else:
         command = ["ros2", *args]

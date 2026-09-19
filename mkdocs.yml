@@ -37,6 +37,7 @@ nav:
   - Configuration: configuration.md
   - Guides:
       - Custom base images & setup scripts: guides/custom-images.md
+      - Building from source (rosdep + lock): guides/rosdep-lockfile.md
       - Team-shared images: guides/team-images.md
       - Multi-host (LAN): guides/multi-host.md
       - Shell tab-completion: guides/tab-completion.md

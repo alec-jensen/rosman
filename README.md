@@ -76,6 +76,7 @@ rosman init --distro humble    # writes rosman.yml
 rosman up                      # builds the image and starts the workspace container
 rosman topic list               # forwarded to `ros2 topic list` inside the container
 rosman colcon build              # forwarded to `colcon build` inside the container
+rosman rosdep install            # resolve + install src/ packages' apt deps, and lock them
 rosman shell                    # interactive shell in the container
 rosman status                   # list rosman-managed containers
 rosman doctor                   # environment/config sanity checks
@@ -85,10 +86,12 @@ rosman down                     # stop the container (rosman up starts it again)
 ```
 
 Anything that isn't one of rosman's own subcommands (`init`, `up`, `down`,
-`status`, `rebuild`, `doctor`, `shell`, `push`, `help`) is forwarded
-verbatim as `ros2 <args>` (or `colcon <args>` if the first word is
-`colcon`) inside the workspace container — rosman does not reimplement the
-`ros2` CLI.
+`status`, `rebuild`, `doctor`, `shell`, `push`, `completion`, `help`) is
+forwarded verbatim as `ros2 <args>` (or `colcon <args>`/`rosdep <args>` if
+the first word is `colcon`/`rosdep`) inside the workspace container —
+rosman does not reimplement the `ros2` CLI. `rosdep install` specifically
+is the one exception: see [Building packages from
+source](#building-packages-from-source-rosdep--rosmanlock) below.
 
 ## Config: `rosman.yml`
 
@@ -146,6 +149,34 @@ setup_script: docker/install_zed_sdk.sh              # anything apt can't expres
   project) to a shell script rosman copies into the build context and
   runs as the rosman user. Editing the script's contents is picked up as
   config drift and triggers a rebuild.
+
+### Building packages from source: `rosdep` + `rosman.lock`
+
+Cloning real ROS 2 source packages into your workspace's `src/` often
+pulls in apt dependencies that aren't part of the default image —
+`colcon build` can succeed while the package still fails at runtime with a
+`ModuleNotFoundError` for a message/service package it depends on.
+
+```sh
+rosman rosdep install
+```
+
+resolves those dependencies from your `src/` packages' `package.xml`
+files, installs them into the running container immediately, and writes
+the result to `rosman.lock`:
+
+```yaml
+# rosman.lock -- generated, check it into git, don't hand-edit
+ros_distro: humble
+apt_packages:
+  - ros-humble-example-interfaces
+```
+
+`rosman.lock` is folded into the image build the same way
+`extra_apt_packages` is, so it survives `rosman rebuild` and is shared
+with your team via git — run `rosman rebuild` after `rosman rosdep
+install` to bake it in. Any other `rosdep` subcommand (`update`, `check`,
+...) is plain passthrough like `colcon`.
 
 ### Team-shared images
 

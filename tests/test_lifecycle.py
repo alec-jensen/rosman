@@ -36,6 +36,28 @@ def test_render_dockerfile_default_uses_ros_image(tmp_path: Path):
     assert "COPY" not in dockerfile
 
 
+def test_render_dockerfile_installs_and_initializes_rosdep(tmp_path: Path):
+    config = make_config(tmp_path)
+    dockerfile = render_dockerfile(config)
+    assert "python3-rosdep" in dockerfile
+    assert "rosdep init" in dockerfile
+    assert "rosdep update" in dockerfile
+
+
+def test_render_dockerfile_includes_locked_apt_packages(tmp_path: Path):
+    config = make_config(tmp_path)
+    config.locked_apt_packages = ["ros-humble-example-interfaces"]
+    dockerfile = render_dockerfile(config)
+    assert "ros-humble-example-interfaces" in dockerfile
+
+
+def test_render_dockerfile_dedupes_extra_and_locked_packages(tmp_path: Path):
+    config = make_config(tmp_path, 'extra_apt_packages: ["ros-humble-example-interfaces"]\n')
+    config.locked_apt_packages = ["ros-humble-example-interfaces"]
+    dockerfile = render_dockerfile(config)
+    assert dockerfile.count("ros-humble-example-interfaces") == 1
+
+
 def test_render_dockerfile_sets_noninteractive_before_any_apt_install(tmp_path: Path):
     # Regression test: on a bare Ubuntu base_image (unlike ros:<distro>,
     # which already sets this), installing ca-certificates pulls in tzdata,
@@ -107,6 +129,13 @@ def test_compute_config_hash_changes_with_base_image(tmp_path: Path):
     plain = make_config(tmp_path)
     with_base = make_config(tmp_path, "base_image: nvidia/cuda:12.4.1-devel-ubuntu22.04\n")
     assert compute_config_hash(plain) != compute_config_hash(with_base)
+
+
+def test_compute_config_hash_changes_with_locked_apt_packages(tmp_path: Path):
+    plain = make_config(tmp_path)
+    locked = make_config(tmp_path)
+    locked.locked_apt_packages = ["ros-humble-example-interfaces"]
+    assert compute_config_hash(plain) != compute_config_hash(locked)
 
 
 def test_compute_config_hash_changes_when_setup_script_content_changes(tmp_path: Path):

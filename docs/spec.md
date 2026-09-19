@@ -433,3 +433,80 @@ just relay the same protocol through the `docker exec` boundary:
   from "start of a ros2/colcon verb" without the user having typed enough
   to disambiguate — both candidate sources are just merged for that one
   position.
+
+---
+
+## Addendum (2026-09-19, part 5): `rosdep` + `rosman.lock`
+
+Surfaced by a real user's first from-source build after v0.1.0: `rosman
+colcon build` succeeded for a cloned `demo_nodes_py`, but `rosman run
+demo_nodes_py talker` failed at runtime with `ModuleNotFoundError:
+example_interfaces` -- `example_interfaces` is a real declared dependency
+of `demo_nodes_py` that isn't part of `ros-base` (what rosman installs by
+default), and `colcon build` doesn't fail just because a pure-Python
+runtime import will later be missing.
+
+This is a whole class of problem, not a one-off: any source package
+cloned into a workspace's `src/` can declare apt-level dependencies
+`ros-base` doesn't have. The standard ROS 2 answer is `rosdep`, which
+rosman's image didn't previously install at all. Alec, once the immediate
+fix was given: "should we have some sort of lockfile that makes it easy
+for rosman to keep track of environment changes?" -- accepted over the
+simpler alternative (just bake `python3-rosdep` in and tell people to run
+plain `rosdep install` themselves), because a plain in-container `rosdep
+install` is exactly the kind of manually-applied, unreproducible, not
+shared-with-the-team change rosman's whole config-as-code model exists to
+avoid (`extra_apt_packages`/`base_image`/`setup_script` are all already
+declarative and git-shared; an ad-hoc `rosdep install` inside a running
+container wouldn't be).
+
+Design:
+- The default image now installs `python3-rosdep` and runs `rosdep
+  init`/`rosdep update` at build time (as the rosman user specifically, so
+  the cache lands under `/home/rosman/.ros/`, which stays readable
+  regardless of the arbitrary runtime UID -- same reasoning as the rest of
+  the arbitrary-UID pattern). `rosdep init` is wrapped `|| true`: a custom
+  `base_image` might already have it initialized, and failing the whole
+  build over that would be worse than a harmless no-op.
+- Every `rosdep` subcommand except `install` is plain passthrough, exactly
+  like `colcon` (`dispatch.py`) -- `rosman rosdep update`/`check`/etc. just
+  work with no special handling.
+- `rosman rosdep install` specifically is intercepted in `cli.main`
+  *before* it reaches passthrough dispatch, because passthrough execs via
+  `os.execvp` on POSIX (replaces the process, never returns to Python) --
+  structurally incompatible with "also write a lockfile afterward." It
+  orchestrates two docker-py `exec_run` calls instead (`rosdep.py`, same
+  pattern `doctor.py`'s network round trip already uses): a `--simulate`
+  dry run to get a clean, parseable resolved-package list, then the real
+  install so the *current* container is usable immediately without
+  waiting for a rebuild.
+- Found only by testing against a real container (not by reasoning about
+  it): `rosdep install`'s real (non-`--simulate`) install path failed with
+  "Unable to locate package" even though `--simulate` had resolved the
+  same package name correctly. Cause: the image strips
+  `/var/lib/apt/lists/*` after its own build to save space, so a running
+  container has no apt package index cached at all, and rosdep's apt
+  installer doesn't run `apt-get update` itself first. Fixed by prefixing
+  the real install with `sudo apt-get update &&` -- `--simulate` never
+  touches apt at all, so it didn't need this and the bug wasn't visible
+  there.
+- `rosman.lock`: a new, separate, auto-generated file (never hand-edited,
+  meant to be checked into git like `uv.lock`/`Cargo.lock`) recording
+  `ros_distro` plus the resolved apt package list. Folded into
+  `render_dockerfile`'s install line alongside `extra_apt_packages`
+  (deduped) and into `compute_config_hash`, so it participates in drift
+  detection/rebuilds exactly like every other thing that affects the
+  built image.
+- `rosman.lock`'s recorded `ros_distro` must match the current
+  `rosman.yml`'s, or `load_config` raises a config error rather than
+  silently trying to install a `humble`-resolved package name against a
+  `jazzy` image (apt package names are distro-suffixed, e.g.
+  `ros-humble-example-interfaces`, so a mismatch wouldn't even resolve,
+  but failing at config-load time with a clear message beats an opaque
+  apt error later).
+- Locks the resolved apt **package set**, not exact versions -- apt
+  doesn't offer the same exact-version-pinning lockfile model
+  language-level package managers do. Reproducible across a team on the
+  same distro; not bit-for-bit deterministic. Explicitly accepted as
+  "good enough," matching the tradeoff already made for `registry_image`
+  sharing.
