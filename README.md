@@ -1,44 +1,24 @@
 # rosman
 
 Run ROS 2 — any distro, on Linux or Windows — without installing it
-natively. `rosman` transparently forwards every `ros2`/`colcon` call you make
-into a Docker container running the right ROS 2 distro for your project, so
-it feels like native `ros2` usage even though Docker is doing all the work
-underneath.
+natively. `rosman` transparently forwards every `ros2`/`colcon` call into a
+Docker container running the right ROS 2 distro for your project, so it
+feels like native `ros2` usage even though Docker does all the work.
 
-A per-repo `rosman.yml` (like `.nvmrc` for Node, or `rust-toolchain.toml` for
-Rust) declares which ROS 2 distro a project needs. `rosman` reads it, ensures
-a container running that distro exists for the current workspace, and execs
-every command into it.
+A per-repo `rosman.yml` (like `.nvmrc` for Node, or `rust-toolchain.toml`
+for Rust) declares which ROS 2 distro a project needs. `rosman` reads it,
+ensures a container running that distro exists for the current workspace,
+and execs every command into it.
 
-**Target platforms: Linux (Docker Engine) and Windows (Docker Desktop).
-The core workflow runs natively on Windows without WSL2; WSL2 is only
-needed for GUI passthrough (WSLg) and USB device attachment (usbipd-win).
-macOS is out of scope.**
-
-## Status
-
-Package is currently unreleased (`0.0.0`) — `0.0.1` gets tagged once
-there's a confirmed stable working base. That said, nearly the entire
-design has been verified end to end against real Docker daemons (Linux
-and Windows), not just unit-tested: `rosman up`, `ros2`/`colcon`
-passthrough, `colcon build`, UID-matched file permissions (including
-across a shared team image built by a different UID than the one running
-it), the `rosman doctor --network-check` talker/listener round trip,
-`gpu: true`, `base_image`/`setup_script` (including on a real
-`nvidia/cuda` build), the `registry_image` team-sharing workflow (build →
-push → a "fresh machine" pulls instead of rebuilding), Linux X11 GUI
-passthrough (a real window rendered on the host desktop), and the core
-Windows workflow running natively without WSL2. Still unverified: WSLg GUI
-passthrough and `usbipd` device attach against real Windows hardware. See
-[`docs/roadmap.md`](docs/roadmap.md) for exact status.
+Target platforms: Linux (Docker Engine) and Windows (Docker Desktop). The
+core workflow runs natively on Windows without WSL2; WSL2 is only needed
+for GUI passthrough (WSLg) and USB device attachment (usbipd-win). macOS
+is not supported.
 
 ## Installation
 
-Once a release is tagged, prebuilt packages are published to
-`https://alec-jensen.github.io/rosman/` and signed with rosman's release
-GPG key (`rosman.gpg`/`rosman.gpg.asc` at that URL). Pick your package
-manager:
+Prebuilt packages are published to `https://alec-jensen.github.io/rosman/`
+and signed with rosman's release GPG key.
 
 **apt (Debian/Ubuntu):**
 ```sh
@@ -69,24 +49,16 @@ echo -e "\n[rosman]\nSigLevel = Required\nServer = https://alec-jensen.github.io
 sudo pacman -Sy rosman
 ```
 
-Once added, `apt upgrade`/`dnf upgrade`/`pacman -Syu` pick up new rosman
-releases automatically, like any other package.
-
-Windows package manager support (winget/Chocolatey) isn't set up yet. Not
-on apt/dnf/pacman, or on Windows? Install from source, below, or grab the
+`apt upgrade`/`dnf upgrade`/`pacman -Syu` pick up new releases
+automatically. Windows package manager support isn't available yet — on
+Windows, or not on apt/dnf/pacman, install from source below, or grab a
 raw binary/wheel from a [GitHub release](https://github.com/alec-jensen/rosman/releases).
 
-### Update notifications
+`rosman` also checks for updates in the background (at most once a day)
+and prints a one-line notice when one's available — it never blocks,
+fails, or interrupts scripted/CI usage.
 
-rosman checks GitHub Releases for a newer version at most once every 24
-hours (never on every command, and it never blocks or fails visibly --
-any network problem is silently ignored). If a newer version is out,
-you'll see a one-line notice before a command's own output, at most once
-a day, only in an interactive terminal (never in scripts/CI). It only
-tells you; it doesn't update anything itself -- run your package
-manager's upgrade command as usual.
-
-## Install (development)
+### From source
 
 ```sh
 uv sync --dev
@@ -97,22 +69,23 @@ uv run rosman --help
 
 ```sh
 cd my-ros2-project
-rosman init --distro humble   # writes rosman.yml
-rosman up                     # builds the image and starts the workspace container
-rosman topic list              # forwarded to `ros2 topic list` inside the container
-rosman colcon build             # forwarded to `colcon build` inside the container
-rosman shell                   # interactive shell in the container
-rosman status                  # list rosman-managed containers
-rosman doctor                  # environment/config sanity checks
-rosman doctor --network-check  # + a two-container pub/sub round trip over the network group
-rosman push                    # build (if needed) and push the image to registry_image, for your team
-rosman down                    # stop the container (rosman up starts it again)
+rosman init --distro humble    # writes rosman.yml
+rosman up                      # builds the image and starts the workspace container
+rosman topic list               # forwarded to `ros2 topic list` inside the container
+rosman colcon build              # forwarded to `colcon build` inside the container
+rosman shell                    # interactive shell in the container
+rosman status                   # list rosman-managed containers
+rosman doctor                   # environment/config sanity checks
+rosman doctor --network-check   # + a two-container pub/sub round trip over the network group
+rosman push                     # build (if needed) and push the image to registry_image, for your team
+rosman down                     # stop the container (rosman up starts it again)
 ```
 
 Anything that isn't one of rosman's own subcommands (`init`, `up`, `down`,
-`status`, `rebuild`, `doctor`, `shell`, `help`) is forwarded verbatim as
-`ros2 <args>` (or `colcon <args>` if the first word is `colcon`) inside the
-workspace container — rosman does not reimplement the `ros2` CLI.
+`status`, `rebuild`, `doctor`, `shell`, `push`, `help`) is forwarded
+verbatim as `ros2 <args>` (or `colcon <args>` if the first word is
+`colcon`) inside the workspace container — rosman does not reimplement the
+`ros2` CLI.
 
 ## Config: `rosman.yml`
 
@@ -134,29 +107,24 @@ registry_image: null          # optional -- share one built image across a team;
 ### Per-machine overrides: `rosman.local.yml`
 
 Some fields are inherently machine-specific — a USB serial adapter or
-camera is very unlikely to land at the same `/dev` path (or COM port) on
-every teammate's machine. Put those in a `rosman.local.yml` next to
-`rosman.yml`; `rosman init` automatically adds it to your `.gitignore` if
-one already exists (or add it yourself: `echo rosman.local.yml >>
-.gitignore`).
+camera rarely lands at the same `/dev` path (or COM port) on every
+teammate's machine. Put those in a `rosman.local.yml` next to
+`rosman.yml`; `rosman init` adds it to an existing `.gitignore`
+automatically.
 
 ```yaml
 # rosman.local.yml -- not checked in
 devices: ["/dev/ttyUSB3"]
 ```
 
-Any field set in `rosman.local.yml` replaces the corresponding value from
-`rosman.yml` entirely (a list like `devices` is swapped wholesale, not
-merged item-by-item). Fields not mentioned in the override come from
-`rosman.yml` as usual. The override file is optional — if it doesn't
-exist, `rosman.yml` resolves exactly as if it weren't supported at all.
+Any field set here replaces the corresponding value from `rosman.yml`
+entirely (a list like `devices` is swapped wholesale, not merged). Fields
+not mentioned come from `rosman.yml` as usual. The file is optional.
 
 ### Custom base images and setup scripts
 
-Projects with heavier requirements — CUDA, a vendor SDK, anything that
-isn't a plain `apt install` — can override the base image and/or supply an
-arbitrary setup script that runs during the image build. Both are optional;
-most projects need neither. Example, for a GPU project using the ZED SDK:
+For projects with heavier requirements — CUDA, a vendor SDK, anything
+beyond a plain `apt install`:
 
 ```yaml
 ros_distro: humble
@@ -166,85 +134,63 @@ devices: ["/dev/video0"]                             # the camera
 setup_script: docker/install_zed_sdk.sh              # anything apt can't express: repos, .run installers, etc.
 ```
 
-- `base_image`: when set, rosman adds the official ROS 2 apt repo and
-  installs `ros-<distro>-ros-base` onto it (instead of using the upstream
-  `ros:<distro>` image, which already has ROS 2 built in). Useful when you
-  need a base other than the stock ROS image — e.g. an `nvidia/cuda` image
-  so GPU library versions are pinned exactly, rather than layering CUDA on
-  top of `ros:<distro>` after the fact.
+- `base_image`: overrides the default `ros:<distro>` image. rosman adds
+  the official ROS 2 apt repo and installs `ros-<distro>-ros-base` onto
+  it — useful when you need a base other than the stock ROS image, e.g.
+  `nvidia/cuda` for exact GPU library versions.
 - `setup_script`: a path (relative to `rosman.yml`, must stay inside the
-  project) to a shell script rosman copies into the build context and runs,
-  as the rosman user, after the base ROS 2 + cyclonedds setup. This is the
-  escape hatch for anything `extra_apt_packages` can't express — adding a
-  vendor's apt repo, running a `.run` installer, `pip install`, etc. Editing
-  the script's contents is picked up as config drift (via a hash of the
-  file, not just its path) and triggers an image rebuild on `rosman up`.
+  project) to a shell script rosman copies into the build context and
+  runs as the rosman user. Editing the script's contents is picked up as
+  config drift and triggers a rebuild.
 
 ### Team-shared images
 
-A team doesn't need to manage its own Dockerfile or image to share one —
-rosman still builds it the usual way; you just push the result once so
-everyone else's `rosman up` pulls it instead of rebuilding locally:
+rosman still builds the image itself — `registry_image` just controls
+where the *result* is cached, so a team shares one build instead of
+everyone rebuilding locally:
 
 ```yaml
 registry_image: ghcr.io/my-team/my-project   # no tag -- rosman appends its own
 ```
 
 ```sh
-rosman push   # builds (if needed) and pushes -- do this once, after `docker login ghcr.io`
+rosman push   # builds (if needed) and pushes -- once, after `docker login ghcr.io`
 rosman up     # teammates: pulls the pushed image instead of building locally
 ```
 
-- `rosman up` tries `docker pull` first whenever `registry_image` is set
-  and the image isn't already cached locally; it only falls back to a
-  local build if nothing's been pushed yet (or the registry isn't
-  reachable).
-- rosman appends its own content-hash tag automatically (the same hash
-  used for local drift detection), so the tag pulled always matches the
-  current `rosman.yml` — don't include a tag yourself.
-- Registry auth is your own `docker login` — rosman doesn't manage
-  credentials.
-- **This is deliberately not "bring your own pre-built image."** rosman
-  always builds the image itself (from `ros:<distro>` or `base_image` +
-  `setup_script`); `registry_image` only controls where the *result* is
-  cached for the team. There's no way to point rosman at an externally
-  built image and skip its own build/setup logic — that's the exact
-  per-developer-managed-image problem rosman exists to remove.
-- The image bakes in a fixed internal user/UID, not whoever happened to
-  build it — each teammate's actual host UID/GID is applied purely at
-  container-*runtime*, so file permissions on the bind-mounted workspace
-  still come out correctly owned no matter who built the shared image.
+`rosman up` tries a pull first whenever `registry_image` is set, falling
+back to a local build if nothing's been pushed yet or the registry isn't
+reachable. Registry auth is your own `docker login`. The image bakes in a
+fixed internal identity, not whoever built it — each machine's actual
+host UID/GID is applied at container runtime, so bind-mounted files still
+come out correctly owned regardless of who built the shared image.
 
 ## Design decisions
 
-- **Bridge network + CycloneDDS unicast peers, not `--network host`.** Host
-  networking is unreliable on Windows Docker Desktop, so rosman standardizes
-  on Cyclone DDS with explicit unicast peer discovery. See
+- **Bridge network + CycloneDDS unicast peers, not `--network host`.**
+  Host networking is unreliable on Windows Docker Desktop, so rosman
+  standardizes on Cyclone DDS with explicit unicast peer discovery. See
   [`src/rosman/networking.py`](src/rosman/networking.py).
 - **One persistent container per workspace.** `rosman up` starts it once;
   every other `rosman <command>` is a `docker exec` into that same
   container.
 - **Thin passthrough for the ROS 2 CLI.** rosman's own logic is scoped to
-  config/version resolution, container lifecycle, and networking.
+  config/version resolution, container lifecycle, and networking — it
+  doesn't reimplement `ros2`.
 
-See [`docs/spec.md`](docs/spec.md) for the full design spec this project is
-built from.
+See [`docs/spec.md`](docs/spec.md) for the full design spec, and
+[`docs/roadmap.md`](docs/roadmap.md) for build/verification status.
 
 ## Known limitations
 
-- **macOS is not supported** and won't be — Linux (Docker Engine) and
-  Windows (Docker Desktop/WSL2) only.
-- **No shell tab-completion** through the container for `ros2`/`colcon`
-  passthrough calls; native `ros2`'s argcomplete-based completion doesn't
-  work through the `docker exec` boundary.
-- **No multi-host DDS discovery.** rosman targets multiple containers on
-  one dev machine. Talking to a real robot over a network/the internet
-  would need something like a VPN mesh (e.g. Husarnet) layered on top —
-  out of scope here.
-- **ROS 2 only** — no ROS 1 distros.
-- rosman wires up GPU/X11 *plumbing* (device passthrough, DISPLAY/XAuth),
-  but doesn't install GUI packages (rviz2, rqt, Gazebo) into the
-  per-workspace image — add them via `extra_apt_packages`.
+- macOS is not supported and won't be.
+- No shell tab-completion for `ros2`/`colcon` passthrough — it doesn't
+  survive the `docker exec` boundary.
+- No multi-host DDS discovery — rosman targets multiple containers on one
+  dev machine, not a robot reachable over a network.
+- ROS 2 only, no ROS 1.
+- rosman wires up GPU/X11 *plumbing* but doesn't install GUI packages
+  (rviz2, rqt, Gazebo) — add them via `extra_apt_packages`.
 
 ## Development
 
