@@ -1,0 +1,36 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Origin: rosman
+Label: rosman
+Suite: stable
+Codename: stable
+Architectures: amd64
+Components: main
+Description: rosman package repository (https://github.com/alec-jensen/rosman)
+Date: Sat, 19 Sep 2026 18:16:31 UTC
+MD5Sum:
+ a991884a018eb0663baacc5856dae89f 598 main/binary-amd64/Packages
+ efd7cff0233a71a3f6ca5565c5933d1a 441 main/binary-amd64/Packages.gz
+SHA1:
+ 257832a556dc120fa57fc24d3987fba3b954a852 598 main/binary-amd64/Packages
+ 5fb14f59039d37f5daaf34abe18872999473cc2a 441 main/binary-amd64/Packages.gz
+SHA256:
+ 9de33aaf14715ea9df2690ae948b39ce85bfd0084f89de4e13987f474b80fd30 598 main/binary-amd64/Packages
+ 0a71b63c1c2b3760a561ee626b3cf14952ab9cb98bdd618c10477cbc00d79ca8 441 main/binary-amd64/Packages.gz
+-----BEGIN PGP SIGNATURE-----
+
+iQIzBAEBCgAdFiEECXP45zRCky8iKstYzZLoFLZyDaMFAmqu0X8ACgkQzZLoFLZy
+DaOftRAAhl3CqAUxBQmelnM65+gEB+9dG6xQVINbm4l7lQ55IIBjfPpa3ftE7p4J
+8GBX5pdB0yVGWHsgAvpMMFzl9DvfzOs7Zw23Or08it2mG0qO8SLcY+lzvRFU2nnH
+mMNb6c4pFVNvTmxQAwMdBapz37mDAuvZu6Ubb0gx4bPRPZpZQIa4kysqMDOhHR6q
+LMuRCciINK7iCwfJOx+lJoimYL05TZ0sewrqDQH5W/zFtGZJAJfFuxQ86+/3+j3h
+xAR/kEwfKNKaf7dvgYGTlDv8P9sO+gvTH8xIq1HhVVb9QJYitN4bZCZH+UXulVHl
+4nyKb0fsuv1TJ8kK2fmoLIkRR4DDiRTD5711R5sx/4RG35AVDgeWNjMRPR1EQcv/
+fMP7sMmELtMHyfb3pbUmjvjsCUrH+a7oUiX1C7q93nUSp4Uyk9pcyu4/Ohl0/Fvf
+bncvGrPzffoijoAWTvQHXTj8GrEQRA9YhP0FMX5FSefQo5twtGEgfgprTjJx2ley
+ft0Np+cydg8HLWGstgxaywVWRk0PQ2AUGPuurHxJxmBwbYHPCRya99GY1cR52jA2
+vC/Urplwlr4/d4ChK00WZDa1XuTBM91HyzVcr2URAEBiGAYA1QHu2EBpClynCCXD
+4whNfCMLXtw63ZQ4HiqcaLZnHzZOoGoKPICvntzOURxWzzQie2I=
+=X4JS
+-----END PGP SIGNATURE-----
