@@ -1,0 +1,19 @@
+name: rosman
+arch: amd64
+platform: linux
+version: ${VERSION}
+section: utils
+priority: optional
+maintainer: Alec Jensen
+description: |
+  Run ROS 2 anywhere without installing it natively.
+  rosman transparently forwards ros2/colcon commands into a Docker
+  container running the right ROS 2 distro for your project.
+vendor: rosman
+homepage: https://github.com/alec-jensen/rosman
+license: MIT
+contents:
+  - src: ./dist/rosman-linux-x86_64
+    dst: /usr/bin/rosman
+    file_info:
+      mode: 0755

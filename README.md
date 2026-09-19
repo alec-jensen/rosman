@@ -33,6 +33,49 @@ Windows workflow running natively without WSL2. Still unverified: WSLg GUI
 passthrough and `usbipd` device attach against real Windows hardware. See
 [`docs/roadmap.md`](docs/roadmap.md) for exact status.
 
+## Installation
+
+Once a release is tagged, prebuilt packages are published to
+`https://alec-jensen.github.io/rosman/` and signed with rosman's release
+GPG key (`rosman.gpg`/`rosman.gpg.asc` at that URL). Pick your package
+manager:
+
+**apt (Debian/Ubuntu):**
+```sh
+curl -fsSL https://alec-jensen.github.io/rosman/rosman.gpg | sudo tee /usr/share/keyrings/rosman-archive-keyring.gpg > /dev/null
+echo "deb [signed-by=/usr/share/keyrings/rosman-archive-keyring.gpg] https://alec-jensen.github.io/rosman/apt stable main" | sudo tee /etc/apt/sources.list.d/rosman.list
+sudo apt update && sudo apt install rosman
+```
+
+**dnf/yum (Fedora/RHEL):**
+```sh
+sudo tee /etc/yum.repos.d/rosman.repo > /dev/null << 'EOF'
+[rosman]
+name=rosman
+baseurl=https://alec-jensen.github.io/rosman/dnf
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://alec-jensen.github.io/rosman/rosman.gpg.asc
+EOF
+sudo dnf install rosman
+```
+
+**pacman (Arch Linux):**
+```sh
+sudo pacman-key --add <(curl -fsSL https://alec-jensen.github.io/rosman/rosman.gpg.asc)
+sudo pacman-key --lsign-key <fingerprint printed above>
+echo -e "\n[rosman]\nSigLevel = Required\nServer = https://alec-jensen.github.io/rosman/pacman" | sudo tee -a /etc/pacman.conf
+sudo pacman -Sy rosman
+```
+
+Once added, `apt upgrade`/`dnf upgrade`/`pacman -Syu` pick up new rosman
+releases automatically, like any other package.
+
+Windows package manager support (winget/Chocolatey) isn't set up yet. Not
+on apt/dnf/pacman, or on Windows? Install from source, below, or grab the
+raw binary/wheel from a [GitHub release](https://github.com/alec-jensen/rosman/releases).
+
 ## Install (development)
 
 ```sh

@@ -1,0 +1,229 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  GPG_KEY_ID: ${{ secrets.RELEASE_GPG_KEY_ID }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      # The repo's own pyproject.toml/__init__.py stay at the unreleased
+      # placeholder version between releases (see their own comments) --
+      # patched here, in the build only, so every artifact this workflow
+      # produces self-reports the real tagged version (`rosman --version`,
+      # the wheel's metadata, etc.) without ever committing a version bump
+      # back to the repo.
+      - name: Set version for this build
+        run: |
+          sed -i "s/^version = \".*\"/version = \"${{ steps.version.outputs.version }}\"/" pyproject.toml
+          sed -i "s/^__version__ = \".*\"/__version__ = \"${{ steps.version.outputs.version }}\"/" src/rosman/__init__.py
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Build Python sdist/wheel
+        run: uv build
+
+      # Built inside ubuntu:22.04 (not on the runner's own glibc) so the
+      # binary runs on Ubuntu 22.04+, Debian 12+, and current Fedora/Arch --
+      # see packaging/build-binary.sh for why this matters.
+      - name: Build standalone Linux binary
+        run: bash packaging/build-binary.sh dist/rosman-linux-x86_64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  package:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Install nfpm
+        run: |
+          curl -sL "https://github.com/goreleaser/nfpm/releases/download/v2.47.0/nfpm_2.47.0_Linux_x86_64.tar.gz" \
+            -o /tmp/nfpm.tar.gz
+          tar -xzf /tmp/nfpm.tar.gz -C /usr/local/bin nfpm
+          chmod +x /usr/local/bin/nfpm
+
+      - name: Build .deb / .rpm / pacman packages
+        run: |
+          nfpm package --config packaging/nfpm.yaml --target dist/ --packager deb
+          nfpm package --config packaging/nfpm.yaml --target dist/ --packager rpm
+          nfpm package --config packaging/nfpm.yaml --target dist/ --packager archlinux
+
+      - name: Import release signing key
+        run: |
+          mkdir -p /tmp/gnupg && chmod 700 /tmp/gnupg
+          echo "${{ secrets.RELEASE_GPG_PRIVATE_KEY }}" | gpg --homedir /tmp/gnupg --batch --import
+
+      - name: Sign the .rpm package
+        run: |
+          docker run --rm -v "$PWD/dist:/dist" -v /tmp/gnupg:/gpghome fedora:latest bash -c '
+            set -e
+            dnf install -y -q rpm-sign > /dev/null
+            cat > /root/.rpmmacros << MACROS
+          %_gpg_path /gpghome
+          %_gpg_digest_algo sha256
+          %_openpgp_sign_id '"$GPG_KEY_ID"'
+          %_gpg_sign_cmd_extra_args --batch --pinentry-mode loopback --passphrase "${{ secrets.RELEASE_GPG_PASSPHRASE }}"
+          MACROS
+            rpm --addsign /dist/rosman-${VERSION}-1.x86_64.rpm
+          '
+
+      - name: Sign the pacman package
+        run: |
+          docker run --rm -v "$PWD/dist:/dist" -v /tmp/gnupg:/gpghome archlinux:latest bash -c '
+            set -e
+            gpg --homedir /gpghome --batch --pinentry-mode loopback \
+              --passphrase "${{ secrets.RELEASE_GPG_PASSPHRASE }}" \
+              --local-user '"$GPG_KEY_ID"' --detach-sign \
+              /dist/rosman-${VERSION}-1-x86_64.pkg.tar.zst
+          '
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.pkg.tar.zst
+            dist/*.sig
+
+  publish-repos:
+    needs: [build, package]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: incoming/
+
+      - name: Import release signing key
+        run: |
+          mkdir -p /tmp/gnupg && chmod 700 /tmp/gnupg
+          echo "${{ secrets.RELEASE_GPG_PRIVATE_KEY }}" | gpg --homedir /tmp/gnupg --batch --import
+          gpg --homedir /tmp/gnupg --export "$GPG_KEY_ID" > /tmp/rosman.gpg
+          gpg --homedir /tmp/gnupg --export -a "$GPG_KEY_ID" > /tmp/rosman.gpg.asc
+
+      - name: Checkout (or create) gh-pages branch
+        run: |
+          if git ls-remote --exit-code --heads origin gh-pages > /dev/null 2>&1; then
+            git fetch origin gh-pages
+            git worktree add public origin/gh-pages
+          else
+            git worktree add --orphan -b gh-pages public
+            git -C public rm -rf . > /dev/null 2>&1 || true
+          fi
+
+      - name: Publish public key
+        run: |
+          cp /tmp/rosman.gpg public/rosman.gpg
+          cp /tmp/rosman.gpg.asc public/rosman.gpg.asc
+
+      - name: Publish apt repo
+        run: |
+          mkdir -p public/apt/pool/main/r/rosman public/apt/dists/stable/main/binary-amd64
+          cp incoming/rosman_${VERSION}_amd64.deb public/apt/pool/main/r/rosman/
+          docker run --rm -v "$PWD/public/apt:/repo" -v /tmp/gnupg:/gpghome debian:bookworm-slim bash -c '
+            set -e
+            apt-get update -qq && apt-get install -y -qq --no-install-recommends dpkg-dev > /dev/null
+            cd /repo
+            dpkg-scanpackages --multiversion pool/ > dists/stable/main/binary-amd64/Packages
+            gzip -9c dists/stable/main/binary-amd64/Packages > dists/stable/main/binary-amd64/Packages.gz
+          '
+          python3 packaging/generate-apt-release.py public/apt
+          gpg --homedir /tmp/gnupg --batch --pinentry-mode loopback \
+            --passphrase "${{ secrets.RELEASE_GPG_PASSPHRASE }}" --local-user "$GPG_KEY_ID" \
+            --clearsign -o public/apt/dists/stable/InRelease public/apt/dists/stable/Release
+          gpg --homedir /tmp/gnupg --batch --pinentry-mode loopback \
+            --passphrase "${{ secrets.RELEASE_GPG_PASSPHRASE }}" --local-user "$GPG_KEY_ID" \
+            --detach-sign -a -o public/apt/dists/stable/Release.gpg public/apt/dists/stable/Release
+
+      - name: Publish dnf repo
+        # createrepo_c (running as root in the container) creates repodata/
+        # owned by root; a later gpg step running as the plain runner user
+        # couldn't then write repomd.xml.asc into that directory (hit this
+        # exact permission error validating locally) -- so sign inside the
+        # same container, with the same fix applied there for consistency.
+        run: |
+          mkdir -p public/dnf
+          cp incoming/rosman-${VERSION}-1.x86_64.rpm public/dnf/
+          docker run --rm -v "$PWD/public/dnf:/repo" -v /tmp/gnupg:/gpghome fedora:latest bash -c '
+            set -e
+            dnf install -y -q createrepo_c > /dev/null
+            cd /repo
+            createrepo_c .
+            gpg --homedir /gpghome --batch --pinentry-mode loopback \
+              --passphrase "${{ secrets.RELEASE_GPG_PASSPHRASE }}" --local-user '"$GPG_KEY_ID"' \
+              --detach-sign -a -o repodata/repomd.xml.asc repodata/repomd.xml
+          '
+
+      - name: Publish pacman repo
+        run: |
+          mkdir -p public/pacman
+          cp incoming/rosman-${VERSION}-1-x86_64.pkg.tar.zst public/pacman/
+          cp incoming/rosman-${VERSION}-1-x86_64.pkg.tar.zst.sig public/pacman/
+          docker run --rm -v "$PWD/public/pacman:/repo" -v /tmp/gnupg:/gpghome archlinux:latest bash -c '
+            set -e
+            pacman -Sy --noconfirm --needed pacman-contrib > /dev/null 2>&1
+            cd /repo
+            GNUPGHOME=/gpghome repo-add --sign --key '"$GPG_KEY_ID"' \
+              rosman.db.tar.gz rosman-${VERSION}-1-x86_64.pkg.tar.zst
+          '
+
+      - name: Commit and push gh-pages
+        run: |
+          cd public
+          git config user.name "rosman-release-bot"
+          git config user.email "actions@github.com"
+          git add -A
+          git commit -m "Publish rosman ${VERSION}"
+          git push origin HEAD:gh-pages
+
+  github-release:
+    needs: [build, package]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: dist/
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/* \
+            --title "rosman ${{ github.ref_name }}" \
+            --generate-notes
