@@ -24,7 +24,17 @@ from rosman.errors import RosmanError
 
 CONTAINER_WORKSPACE_PATH = "/workspace"
 
-RESERVED_COMMANDS = {"init", "up", "down", "status", "rebuild", "doctor", "shell", "help"}
+RESERVED_COMMANDS = {
+    "init",
+    "up",
+    "down",
+    "status",
+    "rebuild",
+    "doctor",
+    "shell",
+    "push",
+    "help",
+}
 
 
 def translate_cwd(config: RosmanConfig, host_cwd: Path | None = None) -> str:

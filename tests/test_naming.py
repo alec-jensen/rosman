@@ -28,6 +28,19 @@ def test_image_name_includes_distro_and_hash(tmp_path: Path):
     assert name.endswith(":abc123")
 
 
+def test_image_name_with_registry_image_ignores_workspace_path(tmp_path: Path):
+    a = tmp_path / "a"
+    b = tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    # Two different local workspace paths must produce the SAME image name
+    # when registry_image is set -- that's the whole point: a team shares
+    # one tag regardless of whose machine (and which path) built it.
+    name_a = image_name(a, "humble", "abc123", registry_image="ghcr.io/team/proj")
+    name_b = image_name(b, "humble", "abc123", registry_image="ghcr.io/team/proj")
+    assert name_a == name_b == "ghcr.io/team/proj:abc123"
+
+
 def test_network_name_slugifies_group():
     assert network_name("My Fleet") == "rosman-net-my-fleet"
 

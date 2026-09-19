@@ -90,6 +90,42 @@ def test_setup_script_rejects_parent_traversal(tmp_path: Path):
         parse_config("ros_distro: humble\nsetup_script: ../../etc/passwd\n", path)
 
 
+def test_registry_image_defaults_to_none(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    config = parse_config(MINIMAL, path)
+    assert config.registry_image is None
+
+
+def test_registry_image_parses(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    text = "ros_distro: humble\nregistry_image: ghcr.io/my-team/my-project\n"
+    config = parse_config(text, path)
+    assert config.registry_image == "ghcr.io/my-team/my-project"
+
+
+def test_registry_image_allows_registry_port_colon(tmp_path: Path):
+    # A colon before the first "/" is a registry host:port, not a tag --
+    # must not be confused with the (rejected) "repo:tag" form below.
+    path = tmp_path / "rosman.yml"
+    text = "ros_distro: humble\nregistry_image: localhost:5000/my-project\n"
+    config = parse_config(text, path)
+    assert config.registry_image == "localhost:5000/my-project"
+
+
+def test_registry_image_rejects_embedded_tag(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    with pytest.raises(ConfigError, match="registry_image"):
+        parse_config(
+            "ros_distro: humble\nregistry_image: ghcr.io/my-team/my-project:latest\n", path
+        )
+
+
+def test_empty_registry_image_is_rejected(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    with pytest.raises(ConfigError, match="registry_image"):
+        parse_config('ros_distro: humble\nregistry_image: ""\n', path)
+
+
 def test_missing_required_field(tmp_path: Path):
     path = tmp_path / "rosman.yml"
     with pytest.raises(ConfigError, match="ros_distro"):

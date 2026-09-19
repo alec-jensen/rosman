@@ -1,6 +1,18 @@
 """Container lifecycle manager: create/start/stop/remove the single
 persistent container for a workspace, detect config drift, and build the
-per-workspace image with a host-UID-matched user baked in.
+per-workspace image.
+
+The image itself bakes in a *fixed* user/UID (see IMAGE_UID/IMAGE_GID) --
+deliberately not the builder's own host UID -- so the exact same image can
+be shared across a team via `registry_image` (built once, pushed, pulled
+by everyone else) without baking in whoever happened to build it first.
+Host-UID file-permission matching still happens, but purely at container
+*runtime* via `docker run --user`, same as always; see the module docstring
+in `platform_support.py`'s neighbor concepts and `create_container` below.
+Because arbitrary runtime UIDs won't have a passwd entry in the image, an
+ENTRYPOINT script patches one in on every container start (the standard
+"arbitrary UID" container pattern), and a few paths that used to be
+chowned to a specific UID at build time are instead made world-writable.
 """
 
 from __future__ import annotations
@@ -13,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import docker
-from docker.errors import BuildError, ImageNotFound, NotFound
+from docker.errors import APIError, BuildError, ImageNotFound, NotFound
 from docker.types import DeviceRequest
 
 from rosman.config import RosmanConfig
@@ -26,7 +38,7 @@ from rosman.docker_client import (
     RESTART_POLICY_LABEL,
     WORKSPACE_LABEL,
 )
-from rosman.errors import ContainerError
+from rosman.errors import ContainerError, RosmanError
 from rosman.naming import container_name, image_name, volume_name, workspace_hash
 from rosman.networking import (
     CYCLONEDDS_CONTAINER_PATH,
@@ -40,6 +52,15 @@ from rosman.state import RosmanState, state_dir
 CONTAINER_WORKSPACE_PATH = "/workspace"
 DEFAULT_USERNAME = "rosman"
 SETUP_SCRIPT_CONTAINER_NAME = "rosman-setup.sh"
+ENTRYPOINT_CONTAINER_PATH = "/usr/local/bin/rosman-entrypoint.sh"
+
+# Fixed identity baked into every rosman image, deliberately *not* the
+# builder's host UID/GID -- this is what makes a `registry_image` byte-
+# identical (and therefore its tag reusable) regardless of who builds it.
+# The actual host UID/GID is still applied at container-*runtime* via
+# `docker run --user` in create_container, exactly as before.
+IMAGE_UID = 1000
+IMAGE_GID = 1000
 
 # Bump whenever render_dockerfile changes in a way that affects the built
 # image (a new apt package, a fixed bug like the /etc/profile.d ROS sourcing
@@ -47,7 +68,7 @@ SETUP_SCRIPT_CONTAINER_NAME = "rosman-setup.sh"
 # fields, so without this a rosman upgrade that fixes something in the
 # template would silently leave existing users on their old, buggy cached
 # image forever -- `rosman up` would just find the old tag and reuse it.
-DOCKERFILE_TEMPLATE_VERSION = 4
+DOCKERFILE_TEMPLATE_VERSION = 5
 
 # Ubuntu codename ROS 2 apt packages are published under for each distro, used
 # only when `base_image` overrides the default `ros:<distro>` image and rosman
@@ -91,19 +112,23 @@ def _setup_script_digest(config: RosmanConfig) -> str:
         return f"MISSING:{config.setup_script}"
 
 
-def compute_config_hash(config: RosmanConfig, uid: int, gid: int) -> str:
+def compute_config_hash(config: RosmanConfig) -> str:
     """Hash of everything that affects the built image. Used both as the
     image tag and as a container label, so `rosman status`/drift detection
     can tell whether a running container matches the current rosman.yml
-    without re-parsing anything."""
+    without re-parsing anything.
+
+    Deliberately does *not* include the host UID/GID: the image bakes in a
+    fixed identity (IMAGE_UID/IMAGE_GID) regardless of who builds it, so two
+    teammates with different host UIDs building the same rosman.yml still
+    get the same hash/tag -- required for `registry_image` sharing to mean
+    anything (a tag that changed per-builder couldn't be shared at all)."""
     payload = "|".join(
         [
             str(DOCKERFILE_TEMPLATE_VERSION),
             config.ros_distro,
             config.rmw_implementation,
             ",".join(sorted(config.extra_apt_packages)),
-            str(uid),
-            str(gid),
             config.base_image or "",
             config.setup_script or "",
             _setup_script_digest(config),
@@ -147,7 +172,38 @@ RUN apt-get update \\
 """
 
 
-def render_dockerfile(config: RosmanConfig, uid: int, gid: int) -> str:
+def _render_entrypoint_script() -> str:
+    """Standard "arbitrary UID" container pattern: patch a passwd entry for
+    whatever UID `docker run --user` actually sets at container start,
+    since the image's own baked user (IMAGE_UID/IMAGE_GID) is a fixed
+    placeholder, not necessarily the runtime UID. Without this, anything
+    that calls getpwuid (bash's own prompt, git, some colcon/rosdep paths,
+    sudo's own PAM checks) misbehaves for a teammate whose host UID isn't
+    exactly IMAGE_UID -- which, sharing one `registry_image`, is everyone
+    except whoever happens to be IMAGE_UID.
+
+    Each line is a separate single-quoted printf argument (never a quoted
+    string broken across Dockerfile continuation lines) for the same reason
+    as the CycloneDDS/profile.d generators: it's the only way to guarantee
+    no stray whitespace or premature `$`-expansion sneaks into the file.
+    """
+    passwd_append_line = (
+        f'    echo "rosman:x:$(id -u):$(id -g)::/home/{DEFAULT_USERNAME}:/bin/bash" '
+        ">> /etc/passwd"
+    )
+    return f"""
+RUN printf '%s\\n' \\
+        '#!/bin/bash' \\
+        'if ! getent passwd "$(id -u)" > /dev/null 2>&1; then' \\
+        '{passwd_append_line}' \\
+        'fi' \\
+        'exec "$@"' \\
+        > {ENTRYPOINT_CONTAINER_PATH} \\
+    && chmod +x {ENTRYPOINT_CONTAINER_PATH}
+"""
+
+
+def render_dockerfile(config: RosmanConfig) -> str:
     base = config.base_image or f"ros:{config.ros_distro}"
     extra_packages = " ".join(config.extra_apt_packages)
     install_extra = f" {extra_packages}" if extra_packages else ""
@@ -171,16 +227,15 @@ def render_dockerfile(config: RosmanConfig, uid: int, gid: int) -> str:
         setup_block = f"""
 COPY {SETUP_SCRIPT_CONTAINER_NAME} /tmp/{SETUP_SCRIPT_CONTAINER_NAME}
 RUN chmod +x /tmp/{SETUP_SCRIPT_CONTAINER_NAME}
-USER $USERNAME
+USER {DEFAULT_USERNAME}
 RUN /tmp/{SETUP_SCRIPT_CONTAINER_NAME}
 USER root
 RUN rm /tmp/{SETUP_SCRIPT_CONTAINER_NAME}
 """
 
+    entrypoint_block = _render_entrypoint_script()
+
     return f"""FROM {base}
-ARG USERNAME={DEFAULT_USERNAME}
-ARG USER_UID={uid}
-ARG USER_GID={gid}
 
 # Must come before any package installation below: on a bare Ubuntu/Debian
 # base (e.g. a `base_image` override like nvidia/cuda, which -- unlike
@@ -193,29 +248,40 @@ ARG USER_GID={gid}
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 {ros_install_block}
-RUN (getent group $USER_GID || groupadd --gid $USER_GID $USERNAME) \\
-    && (getent passwd $USER_UID || \\
-        useradd --uid $USER_UID --gid $USER_GID -m -s /bin/bash $USERNAME) \\
+RUN (getent group {IMAGE_GID} || groupadd --gid {IMAGE_GID} {DEFAULT_USERNAME}) \\
+    && (getent passwd {IMAGE_UID} || \\
+        useradd --uid {IMAGE_UID} --gid {IMAGE_GID} -m -s /bin/bash {DEFAULT_USERNAME}) \\
     && apt-get update \\
     && apt-get install -y --no-install-recommends \\
         sudo python3-colcon-common-extensions \\
         ros-{config.ros_distro}-rmw-cyclonedds-cpp{install_extra} \\
-    && echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME \\
-    && chmod 0440 /etc/sudoers.d/$USERNAME \\
+    && echo "ALL ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/rosman \\
+    && chmod 0440 /etc/sudoers.d/rosman \\
     && rm -rf /var/lib/apt/lists/*
+
+# Everything below is world-writable/-readable rather than owned by a
+# specific UID: the image's baked identity ({IMAGE_UID}:{IMAGE_GID}) is
+# deliberately not tied to whichever host UID actually runs the container
+# (see IMAGE_UID's docstring above) -- a `registry_image` shared across a
+# team gets pulled and run by many different host UIDs, none of which need
+# match {IMAGE_UID}, so nothing that a runtime UID must write to can be
+# chowned to a single fixed UID at build time.
+RUN chmod 0777 /home/{DEFAULT_USERNAME} \\
+    && chmod 0666 /etc/passwd
 
 # build/install/log are mounted as named volumes (see naming.py::volume_name),
 # not part of the workspace bind mount -- a fresh named volume is empty, and
-# Docker only inherits the *image's* ownership/permissions at that path into
-# it on first mount. Without pre-creating these owned by the rosman user, the
-# volumes come up root-owned and every `colcon build` fails with EACCES.
+# Docker only inherits the *image's* permissions at that path into it on
+# first mount. Without this, the volumes come up root-owned and every
+# `colcon build` fails with EACCES under an arbitrary runtime UID.
 RUN mkdir -p {CONTAINER_WORKSPACE_PATH}/build {CONTAINER_WORKSPACE_PATH}/install \\
         {CONTAINER_WORKSPACE_PATH}/log \\
-    && chown -R $USER_UID:$USER_GID {CONTAINER_WORKSPACE_PATH}
+    && chmod -R 0777 {CONTAINER_WORKSPACE_PATH}
 
 ENV RMW_IMPLEMENTATION={RMW_IMPLEMENTATION_ENV}
 ENV RCUTILS_COLORIZED_OUTPUT=1
 ENV ROS_DISTRO={config.ros_distro}
+ENV HOME=/home/{DEFAULT_USERNAME}
 
 # `ros2`/colcon overlay setup only takes effect once setup.bash is sourced,
 # and that's a per-shell action, not a static PATH -- the ros:<distro>
@@ -230,7 +296,9 @@ RUN printf '%s\\n' \\
         > /etc/profile.d/rosman-ros.sh \\
     && chmod +x /etc/profile.d/rosman-ros.sh
 {setup_block}
+{entrypoint_block}
 WORKDIR {CONTAINER_WORKSPACE_PATH}
+ENTRYPOINT ["{ENTRYPOINT_CONTAINER_PATH}"]
 """
 
 
@@ -240,21 +308,42 @@ class DriftReport:
     reasons: list[str]
 
 
+@dataclass
+class ImageResult:
+    tag: str
+    source: str  # "cached" | "pulled" | "built"
+
+
 class ContainerManager:
     def __init__(self, client: docker.DockerClient, state: RosmanState):
         self.client = client
         self.state = state
+        # Set by create_container whenever it actually resolves an image
+        # (cached/pulled/built), so the CLI layer can tell the user whether
+        # a `registry_image` pull actually happened -- without changing
+        # ensure_running/create_container's return shape for every caller.
+        self.last_image_result: ImageResult | None = None
 
     # -- image -----------------------------------------------------------
 
-    def ensure_image(self, config: RosmanConfig, config_hash: str) -> str:
-        uid, gid = host_uid_gid()
-        tag = image_name(config.workspace_root, config.ros_distro, config_hash)
+    def ensure_image(self, config: RosmanConfig, config_hash: str) -> ImageResult:
+        tag = image_name(
+            config.workspace_root, config.ros_distro, config_hash, config.registry_image
+        )
         try:
             self.client.images.get(tag)
-            return tag
+            return ImageResult(tag=tag, source="cached")
         except ImageNotFound:
             pass
+
+        if config.registry_image:
+            try:
+                self.client.images.pull(tag)
+                return ImageResult(tag=tag, source="pulled")
+            except (ImageNotFound, APIError):
+                # Not pushed yet, or no registry access -- fall back to a
+                # local build below rather than failing `rosman up` outright.
+                pass
 
         setup_script_source = None
         if config.setup_script:
@@ -265,7 +354,7 @@ class ContainerManager:
                     f"{setup_script_source}) does not exist."
                 )
 
-        dockerfile = render_dockerfile(config, uid, gid)
+        dockerfile = render_dockerfile(config)
         with tempfile.TemporaryDirectory(prefix="rosman-build-") as build_dir_str:
             build_dir = Path(build_dir_str)
             (build_dir / "Dockerfile").write_text(dockerfile)
@@ -280,7 +369,35 @@ class ContainerManager:
                     f"Check that '{base}' is a valid image and, if set, that "
                     f"setup_script '{config.setup_script}' runs cleanly."
                 ) from exc
-        return tag
+        return ImageResult(tag=tag, source="built")
+
+    def push_image(self, config: RosmanConfig) -> str:
+        """Build (if needed) and push the workspace's image to
+        `registry_image`, so teammates' `rosman up` can pull it instead of
+        building locally. Requires the registry credentials to already be
+        set up via `docker login <registry>` -- rosman doesn't manage
+        registry auth itself, same as the plain `docker` CLI wouldn't."""
+        if not config.registry_image:
+            raise RosmanError(
+                "Set 'registry_image' in rosman.yml before running `rosman push` "
+                "(e.g. registry_image: ghcr.io/my-team/my-project)."
+            )
+        config_hash = compute_config_hash(config)
+        result = self.ensure_image(config, config_hash)
+        try:
+            push_log = self.client.images.push(result.tag, stream=True, decode=True)
+            for entry in push_log:
+                if "error" in entry:
+                    raise ContainerError(
+                        f"Failed to push {result.tag}: {entry['error']}\n"
+                        f"Make sure you're logged in: `docker login` against that registry."
+                    )
+        except APIError as exc:
+            raise ContainerError(
+                f"Failed to push {result.tag}: {exc}\n"
+                f"Make sure you're logged in: `docker login` against that registry."
+            ) from exc
+        return result.tag
 
     # -- lookup ------------------------------------------------------------
 
@@ -297,8 +414,7 @@ class ContainerManager:
     # -- drift ---------------------------------------------------------
 
     def detect_drift(self, container, config: RosmanConfig) -> DriftReport:
-        uid, gid = host_uid_gid()
-        expected_hash = compute_config_hash(config, uid, gid)
+        expected_hash = compute_config_hash(config)
         labels = container.labels or {}
         reasons = []
         if labels.get(DISTRO_LABEL) != config.ros_distro:
@@ -337,8 +453,10 @@ class ContainerManager:
 
     def create_container(self, config: RosmanConfig):
         uid, gid = host_uid_gid()
-        config_hash = compute_config_hash(config, uid, gid)
-        image_tag = self.ensure_image(config, config_hash)
+        config_hash = compute_config_hash(config)
+        image_result = self.ensure_image(config, config_hash)
+        self.last_image_result = image_result
+        image_tag = image_result.tag
         domain_id = self.resolve_domain_id(config)
         name = container_name(config.workspace_root)
 

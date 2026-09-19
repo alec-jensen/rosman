@@ -285,3 +285,62 @@ persistent container, bridge network + CycloneDDS, thin ros2/colcon
 passthrough — they only extend *how the image gets built*, which was
 already the part of the config schema explicitly designed to be extended
 (`extra_apt_packages` was the same kind of knob, just narrower).
+
+---
+
+## Addendum (2026-09-19, part 2): team-shared images via a registry
+
+A follow-up gap, surfaced once the base_image/setup_script work above was
+live-tested: a team wants everyone to run the *same* image without every
+member independently rebuilding it. Two designs were considered and one
+was explicitly rejected:
+
+- **Rejected: "bring your own pre-built image."** Letting a project point
+  rosman at an already-built image and skip rosman's own build entirely
+  was considered and explicitly ruled out. Alec's words: "I don't think we
+  actually want to support bring your own image. I think that's exactly
+  what this project wants to eliminate, is needing to manage your own
+  image." rosman always builds the image itself; nothing changes about
+  that.
+- **Adopted: `registry_image`.** rosman still builds the image exactly as
+  before (`ros:<distro>` or `base_image` + `setup_script`); this field only
+  says where to cache the *result* for a team. `rosman push` builds (if
+  needed) and pushes to that repository, tagged with the same content-hash
+  already used for local drift detection. `rosman up` tries `docker pull`
+  against that tag before building locally, falling back to a local build
+  only if nothing's been pushed yet or the registry isn't reachable.
+
+Making this actually work correctly for a team required fixing a real,
+previously-latent bug: the image used to bake in the **builder's own host
+UID/GID** (for the file-permission-matching feature), which meant two
+teammates with different host UIDs building the identical `rosman.yml`
+got *different* image tags — there would have been no shared tag to push
+or pull in the first place. Fixed by decoupling the two:
+
+- The image now bakes in a fixed, arbitrary identity (uid/gid 1000, a
+  `rosman` user) regardless of who builds it — this is what makes the
+  image itself byte-identical (and its content-hash tag reusable) across
+  different builders.
+- The actual host UID/GID is still applied purely at container *runtime*
+  (`docker run --user`, unchanged from before) — this is still what makes
+  bind-mounted workspace files come out correctly owned on the host,
+  regardless of who built the image.
+- Since an arbitrary runtime UID won't have a `/etc/passwd` entry for the
+  image's fixed baked-in user, an `ENTRYPOINT` script patches one in on
+  every container start (the standard "arbitrary UID" container pattern
+  used by e.g. OpenShift-compatible images). Without this, anything that
+  calls `getpwuid` — `bash`'s own prompt, `git`, some `colcon`/`rosdep`
+  paths, `sudo`'s PAM checks — misbehaves for any teammate whose host UID
+  isn't exactly 1000.
+- A few paths that used to be `chown`ed to the builder's UID at build time
+  (the user's home directory, and the `build`/`install`/`log` named
+  volumes) are instead made world-writable, since there's no longer a
+  single "correct" UID to chown them to at build time.
+
+This loosens the in-container permission model slightly — any UID can
+write to those specific paths, and `sudo` is now UID-agnostic
+(`ALL ALL=(ALL) NOPASSWD:ALL` rather than keyed to one username). Judged
+acceptable because the threat model here is a personal/team dev container
+someone already has `docker exec` access to, not a multi-tenant system —
+but it's a deliberate tradeoff, not an oversight, and worth knowing about
+if that threat model is ever wrong for a given project.

@@ -38,17 +38,40 @@ passthrough once declared via `extra_apt_packages` (they're not in the
 base `ros:<distro>` image by default) — real talker/listener messages
 observed via `rosman topic echo`.
 
+**Third round (same day): team-shared images.** Requested support for a
+team building one image once and sharing it via a registry (GHCR named
+specifically), explicitly *not* "bring your own pre-built image" — see
+`spec.md`'s second addendum and Phase 7 below. Implementing this
+correctly surfaced and fixed a real, previously-latent bug: the image used
+to bake in the *builder's own host UID/GID*, which meant two teammates
+with different UIDs building the same `rosman.yml` got different image
+tags — there was no shared tag to actually push/pull. Decoupled: the image
+now bakes in a fixed uid/gid (1000), and host UID/GID matching happens
+purely at container-runtime (`--user`, unchanged); an `ENTRYPOINT` script
+patches `/etc/passwd` for whatever arbitrary UID actually runs the
+container. **Live-verified 2026-09-19**, including the exact scenario the
+whole feature exists for: built an image, pushed it to a real (local,
+auth-free) test registry, removed every local copy to simulate a fresh
+machine, ran `rosman up` and confirmed it pulled instead of rebuilding,
+and directly confirmed the pulled image works correctly under a genuinely
+different, arbitrary UID (not 1000) — `sudo`, `$HOME`, file writes to
+`build`/`install`/`log`, and `ros2`/`colcon` on `$PATH` all correct.
+
 Still not verified live: Linux X11 GUI passthrough (no real X server
 exercised through Docker here) and all of the Windows WSL2/WSLg/usbipd
-path (this isn't a Windows machine).
+path (this isn't a Windows machine — though a Windows-side session is
+now working on this separately).
 
 ## Phase 1 — single container, no networking — done
 - Config resolver (`rosman/config.py`): finds/validates `rosman.yml`,
   walking up from cwd like `.git` discovery.
 - `rosman init` scaffolds a config.
 - Container lifecycle manager (`rosman/lifecycle.py`): per-workspace image
-  build with a host-UID/GID-matched user baked in (rocker-style), container
-  create/start/stop/remove.
+  build, container create/start/stop/remove. Originally baked the
+  builder's own host UID/GID into the image (rocker-style); as of Phase 7,
+  the image bakes in a fixed identity instead and UID/GID matching happens
+  purely at container-runtime, so the same image is shareable across a
+  team regardless of who built it.
 - `ros2`/`colcon` passthrough (`rosman/dispatch.py`) with working-directory
   translation into the container's mounted workspace. **Live-verified
   2026-09-19** (see "Live verification" above) — this is also where the
@@ -143,6 +166,42 @@ vendor SDK) surfaced the gap. Full rationale in `spec.md`'s addendum.
   tested with an actual ZED SDK installer specifically (no camera/license
   here) — the mechanism is proven, a real vendor script is the next thing
   to try against real hardware.
+
+## Phase 7 — team-shared images via a registry — done, live-verified
+Not in the original spec; added 2026-09-19 at Alec's explicit request, with
+one explicit non-goal: **not** "bring your own pre-built image" — rosman
+still always builds the image itself. Full rationale in `spec.md`'s second
+addendum.
+
+- `registry_image` config field (`rosman/naming.py::image_name`): when
+  set, replaces the local-path-based repository name entirely, so the
+  same content-hash tag is portable across machines/builders.
+- `rosman push` (`ContainerManager.push_image`): builds locally if needed,
+  then pushes to `registry_image`. Relies on the user's own
+  `docker login`; rosman doesn't manage registry credentials.
+- `ContainerManager.ensure_image` now tries `docker pull` against
+  `registry_image` before building locally, falling back to a local build
+  if nothing's been pushed yet or the registry isn't reachable. Returns an
+  `ImageResult(tag, source)` (`"cached"`/`"pulled"`/`"built"`) so
+  `rosman up` can tell the user which one happened.
+- **The UID-decoupling fix** (image bakes in a fixed 1000:1000 identity;
+  an `ENTRYPOINT` script patches `/etc/passwd` for whatever arbitrary UID
+  actually runs the container; `/home/rosman`,
+  `build`/`install`/`log`, and `/etc/passwd` are made world-writable
+  instead of chowned to a specific UID at build time; `sudo` is granted to
+  `ALL` rather than one baked username) — required for `registry_image` to
+  mean anything across teammates with different host UIDs. This loosens
+  in-container permissions somewhat; judged acceptable for a personal/team
+  dev container's threat model, not a multi-tenant one. `DOCKERFILE_TEMPLATE_VERSION`
+  bumped to 5.
+- **Live-verified 2026-09-19**: built an image, pushed to a real local test
+  registry, simulated a fresh machine (removed every local copy), ran
+  `rosman up` and confirmed it printed "Pulled shared image..." instead of
+  building, and directly ran the shared image under `--user 88888:88888`
+  (a UID with no pre-existing passwd entry) to confirm `id`/`whoami`,
+  `sudo whoami` → `root`, `$HOME` resolution, and write access to
+  `build`/`install`/`log` all work correctly for a UID that never built
+  the image.
 
 ## Phase 5 — polish — mostly done
 - Working-directory translation edge cases: checked both flagged cases.

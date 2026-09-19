@@ -23,7 +23,7 @@ from docker.errors import APIError, NotFound
 from rosman.config import RosmanConfig
 from rosman.docker_client import DOMAIN_ID_LABEL, MANAGED_LABEL, NETWORK_GROUP_LABEL, get_client
 from rosman.errors import RosmanError
-from rosman.lifecycle import ContainerManager, compute_config_hash, host_uid_gid
+from rosman.lifecycle import ContainerManager, compute_config_hash
 from rosman.networking import (
     CYCLONEDDS_CONTAINER_PATH,
     RMW_IMPLEMENTATION_ENV,
@@ -79,8 +79,7 @@ def run_checks(config: RosmanConfig, network_check: bool = False) -> list[Check]
 
     checks.append(Check("config", True, f"{config.config_path} parsed OK"))
 
-    uid, gid = host_uid_gid()
-    config_hash = compute_config_hash(config, uid, gid)
+    config_hash = compute_config_hash(config)
     checks.append(Check("config hash", True, config_hash))
 
     state = RosmanState.load()
@@ -152,10 +151,9 @@ def run_network_roundtrip(
     # `ros:<distro>` upstream one: only rosman's build installs the
     # rmw_cyclonedds_cpp package, and RMW_IMPLEMENTATION would fail to
     # load against a plain base image that doesn't have it.
-    uid, gid = host_uid_gid()
-    config_hash = compute_config_hash(config, uid, gid)
+    config_hash = compute_config_hash(config)
     try:
-        image = manager.ensure_image(config, config_hash)
+        image = manager.ensure_image(config, config_hash).tag
     except RosmanError as exc:
         return Check("networking round-trip", False, f"could not build/find image: {exc}")
 

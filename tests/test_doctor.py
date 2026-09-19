@@ -6,6 +6,7 @@ from docker.errors import NotFound
 
 from rosman import doctor as doctor_mod
 from rosman.config import parse_config
+from rosman.lifecycle import ImageResult
 
 
 def make_config(tmp_path: Path):
@@ -25,7 +26,7 @@ class FakeManager:
         return self.domain_id
 
     def ensure_image(self, config, config_hash):
-        return self.image
+        return ImageResult(tag=self.image, source="built")
 
 
 def _patch_networking(monkeypatch, tmp_path):

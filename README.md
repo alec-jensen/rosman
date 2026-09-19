@@ -16,15 +16,18 @@ WSL2 backend). macOS is out of scope.**
 
 ## Status
 
-Phases 1-4 of the build order in [`docs/spec.md`](docs/spec.md) are
-implemented: config resolution, container lifecycle with drift detection,
-`ros2`/`colcon` passthrough, CycloneDDS unicast-peer networking (including
-a `rosman doctor --network-check` talker/listener round trip), and Linux
-X11/Windows WSLg GUI passthrough plus usbipd-win device guidance. None of
-the Docker-dependent code paths have been exercised against a live Docker
-daemon yet (this was built in a sandbox without daemon access) — see
-[`docs/roadmap.md`](docs/roadmap.md) for exactly what still needs
-real-world verification before calling it done.
+Package is currently unreleased (`0.0.0`) — `0.0.1` gets tagged once
+there's a confirmed stable working base. That said, most of the design has
+been verified end to end against a real Docker daemon, not just
+unit-tested: `rosman up`, `ros2`/`colcon` passthrough, `colcon build`,
+UID-matched file permissions (including across a shared team image built
+by a different UID than the one running it), the
+`rosman doctor --network-check` talker/listener round trip, `gpu: true`,
+`base_image`/`setup_script` (including on a real `nvidia/cuda` build), and
+the `registry_image` team-sharing workflow (build → push → a "fresh
+machine" pulls instead of rebuilding). Still unverified: Linux GUI (X11)
+passthrough against a real display, and the Windows/WSL2/WSLg/usbipd path
+end to end. See [`docs/roadmap.md`](docs/roadmap.md) for exact status.
 
 ## Install (development)
 
@@ -45,6 +48,7 @@ rosman shell                   # interactive shell in the container
 rosman status                  # list rosman-managed containers
 rosman doctor                  # environment/config sanity checks
 rosman doctor --network-check  # + a two-container pub/sub round trip over the network group
+rosman push                    # build (if needed) and push the image to registry_image, for your team
 rosman down                    # stop the container (rosman up starts it again)
 ```
 
@@ -67,6 +71,7 @@ extra_apt_packages: []        # optional list, installed into the image on first
 restart_policy: "no"          # docker restart policy: "no" (default), "unless-stopped", "always", "on-failure"
 base_image: null              # optional -- override the default `ros:<distro>` base image
 setup_script: null            # optional -- path to a shell script rosman runs during the image build
+registry_image: null          # optional -- share one built image across a team; see below
 ```
 
 ### Custom base images and setup scripts
@@ -97,6 +102,41 @@ setup_script: docker/install_zed_sdk.sh              # anything apt can't expres
   vendor's apt repo, running a `.run` installer, `pip install`, etc. Editing
   the script's contents is picked up as config drift (via a hash of the
   file, not just its path) and triggers an image rebuild on `rosman up`.
+
+### Team-shared images
+
+A team doesn't need to manage its own Dockerfile or image to share one —
+rosman still builds it the usual way; you just push the result once so
+everyone else's `rosman up` pulls it instead of rebuilding locally:
+
+```yaml
+registry_image: ghcr.io/my-team/my-project   # no tag -- rosman appends its own
+```
+
+```sh
+rosman push   # builds (if needed) and pushes -- do this once, after `docker login ghcr.io`
+rosman up     # teammates: pulls the pushed image instead of building locally
+```
+
+- `rosman up` tries `docker pull` first whenever `registry_image` is set
+  and the image isn't already cached locally; it only falls back to a
+  local build if nothing's been pushed yet (or the registry isn't
+  reachable).
+- rosman appends its own content-hash tag automatically (the same hash
+  used for local drift detection), so the tag pulled always matches the
+  current `rosman.yml` — don't include a tag yourself.
+- Registry auth is your own `docker login` — rosman doesn't manage
+  credentials.
+- **This is deliberately not "bring your own pre-built image."** rosman
+  always builds the image itself (from `ros:<distro>` or `base_image` +
+  `setup_script`); `registry_image` only controls where the *result* is
+  cached for the team. There's no way to point rosman at an externally
+  built image and skip its own build/setup logic — that's the exact
+  per-developer-managed-image problem rosman exists to remove.
+- The image bakes in a fixed internal user/UID, not whoever happened to
+  build it — each teammate's actual host UID/GID is applied purely at
+  container-*runtime*, so file permissions on the bind-mounted workspace
+  still come out correctly owned no matter who built the shared image.
 
 ## Design decisions
 

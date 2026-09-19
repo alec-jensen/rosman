@@ -29,7 +29,15 @@ def container_name(workspace_root: Path) -> str:
     return f"rosman-{project}-{workspace_hash(workspace_root)}"
 
 
-def image_name(workspace_root: Path, ros_distro: str, config_hash: str) -> str:
+def image_name(
+    workspace_root: Path, ros_distro: str, config_hash: str, registry_image: str | None = None
+) -> str:
+    """`registry_image`, when set, replaces the local-path-based repository
+    entirely (e.g. "ghcr.io/my-team/my-project") so the tag is portable
+    across machines -- required for a team to share one built-and-pushed
+    image rather than everyone building their own local copy."""
+    if registry_image:
+        return f"{registry_image}:{config_hash}"
     return f"rosman/{ros_distro}-{workspace_hash(workspace_root)}:{config_hash}"
 
 

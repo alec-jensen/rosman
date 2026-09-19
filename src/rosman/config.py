@@ -54,6 +54,7 @@ _DEFAULTS: dict[str, Any] = {
     "restart_policy": "no",
     "base_image": None,
     "setup_script": None,
+    "registry_image": None,
 }
 
 
@@ -72,6 +73,7 @@ class RosmanConfig:
     restart_policy: str = "no"
     base_image: str | None = None
     setup_script: str | None = None
+    registry_image: str | None = None
 
     # Not part of the YAML schema — filled in by the loader.
     config_path: Path = field(default=None, repr=False)  # type: ignore[assignment]
@@ -143,6 +145,23 @@ def _validate_base_image(value: Any, path: Path) -> str | None:
         raise ConfigError(
             f"{path}: 'base_image' must be a non-empty image reference string "
             "(e.g. \"nvidia/cuda:12.4.1-devel-ubuntu22.04\"), or omitted entirely."
+        )
+    return value
+
+
+def _validate_registry_image(value: Any, path: Path) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise ConfigError(
+            f"{path}: 'registry_image' must be a non-empty repository reference "
+            "(e.g. \"ghcr.io/my-team/my-project\", with no tag -- rosman appends "
+            "its own config-hash tag), or omitted entirely."
+        )
+    if ":" in value.rsplit("/", 1)[-1]:
+        raise ConfigError(
+            f"{path}: 'registry_image' must not include a tag ({value!r}) -- rosman "
+            "appends its own config-hash tag so pulls/pushes stay in sync with rosman.yml."
         )
     return value
 
@@ -242,6 +261,9 @@ def parse_config(text: str, path: Path) -> RosmanConfig:
         base_image=_validate_base_image(data.get("base_image", _DEFAULTS["base_image"]), path),
         setup_script=_validate_setup_script(
             data.get("setup_script", _DEFAULTS["setup_script"]), path
+        ),
+        registry_image=_validate_registry_image(
+            data.get("registry_image", _DEFAULTS["registry_image"]), path
         ),
         config_path=path,
     )

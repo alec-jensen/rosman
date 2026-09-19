@@ -22,7 +22,7 @@ from rosman.dispatch import RESERVED_COMMANDS, dispatch_passthrough, shell_comma
 from rosman.docker_client import get_client
 from rosman.doctor import run_checks
 from rosman.errors import RosmanError
-from rosman.lifecycle import ContainerManager
+from rosman.lifecycle import ContainerManager, ImageResult
 from rosman.state import RosmanState
 
 console = Console()
@@ -90,9 +90,23 @@ def cmd_up(args: argparse.Namespace) -> int:
         f"Starting rosman container for this workspace ({config.ros_distro})..."
     )
     container, created = manager.ensure_running(config)
+    if created and manager.last_image_result is not None:
+        _print_image_source(config, manager.last_image_result)
     verb = "Started" if not created else "Created and started"
     console.print(f"[green]{verb}[/green] {container.name}")
     return 0
+
+
+def _print_image_source(config: RosmanConfig, result: ImageResult) -> None:
+    if not config.registry_image:
+        return
+    if result.source == "pulled":
+        console.print(f"[green]Pulled[/green] shared image {result.tag}")
+    elif result.source == "built":
+        console.print(
+            f"Built image locally (not yet on {config.registry_image}) -- "
+            f"run `rosman push` to share it with your team."
+        )
 
 
 def cmd_down(args: argparse.Namespace) -> int:
@@ -204,6 +218,18 @@ def cmd_shell(args: argparse.Namespace) -> int:
     return shell_command(container.name, workdir, shell=args.shell)
 
 
+def cmd_push(args: argparse.Namespace) -> int:
+    config = _load_config_or_exit()
+    if config.registry_image:
+        console.print(f"Pushing image to {config.registry_image}...")
+    client = get_client()
+    state = RosmanState.load()
+    manager = ContainerManager(client, state)
+    tag = manager.push_image(config)
+    console.print(f"[green]Pushed[/green] {tag}")
+    return 0
+
+
 def cmd_passthrough(args: list[str]) -> int:
     config = _load_config_or_exit()
     client = get_client()
@@ -267,6 +293,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_shell = subparsers.add_parser("shell", help="Open an interactive shell in the container")
     p_shell.add_argument("--shell", default="bash", help="Shell to run (default: bash)")
     p_shell.set_defaults(func=cmd_shell)
+
+    p_push = subparsers.add_parser(
+        "push", help="Build (if needed) and push the image to 'registry_image' for your team"
+    )
+    p_push.set_defaults(func=cmd_push)
 
     def _print_help(_args: argparse.Namespace) -> int:
         parser.print_help()
