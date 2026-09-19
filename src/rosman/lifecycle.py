@@ -62,13 +62,25 @@ ENTRYPOINT_CONTAINER_PATH = "/usr/local/bin/rosman-entrypoint.sh"
 IMAGE_UID = 1000
 IMAGE_GID = 1000
 
+# Standard Debian/Ubuntu groups that own hardware device nodes by default
+# (serial adapters under dialout, cameras under video, block devices under
+# disk, etc). `--device` alone only grants cgroup-level access to the node;
+# the node's own Unix permissions (typically owner root, group one of these,
+# mode 0660) still block a non-root, non-member process from opening it.
+# Passed to `containers.create(group_add=...)` at runtime (so it applies
+# regardless of which UID/GID `--user` ends up being) and guaranteed to
+# exist in the image via `render_dockerfile` (some minimal base images may
+# be missing one, e.g. `plugdev`, so the build creates whichever are absent
+# rather than assuming every base image already has them).
+DEVICE_GROUPS = ["dialout", "video", "audio", "plugdev", "disk", "tty", "uucp"]
+
 # Bump whenever render_dockerfile changes in a way that affects the built
 # image (a new apt package, a fixed bug like the /etc/profile.d ROS sourcing
 # fix). Config-hash inputs otherwise only cover *user-facing* rosman.yml
 # fields, so without this a rosman upgrade that fixes something in the
 # template would silently leave existing users on their old, buggy cached
 # image forever -- `rosman up` would just find the old tag and reuse it.
-DOCKERFILE_TEMPLATE_VERSION = 5
+DOCKERFILE_TEMPLATE_VERSION = 6
 
 # Ubuntu codename ROS 2 apt packages are published under for each distro, used
 # only when `base_image` overrides the default `ros:<distro>` image and rosman
@@ -251,6 +263,8 @@ ENV TZ=Etc/UTC
 RUN (getent group {IMAGE_GID} || groupadd --gid {IMAGE_GID} {DEFAULT_USERNAME}) \\
     && (getent passwd {IMAGE_UID} || \\
         useradd --uid {IMAGE_UID} --gid {IMAGE_GID} -m -s /bin/bash {DEFAULT_USERNAME}) \\
+    && (for grp in {" ".join(DEVICE_GROUPS)}; do getent group "$grp" > /dev/null \\
+        || groupadd --system "$grp"; done) \\
     && apt-get update \\
     && apt-get install -y --no-install-recommends \\
         sudo python3-colcon-common-extensions \\
@@ -483,6 +497,12 @@ class ContainerManager:
         }
 
         devices = [f"{d}:{d}:rwm" for d in config.devices] if config.devices else None
+        # `--device` only grants cgroup-level access; the device node's own
+        # Unix permissions (usually group-owned, e.g. dialout/video/disk)
+        # still block the container's non-root user without this. See
+        # DEVICE_GROUPS' docstring -- these are guaranteed to exist in the
+        # image regardless of base_image, so this is safe unconditionally.
+        group_add = DEVICE_GROUPS if config.devices else None
         device_requests = None
         if config.gpu:
             device_requests = [DeviceRequest(count=-1, capabilities=[["gpu"]])]
@@ -514,6 +534,7 @@ class ContainerManager:
             environment=environment,
             devices=devices,
             device_requests=device_requests,
+            group_add=group_add,
             restart_policy={"Name": config.restart_policy},
             labels=labels,
             working_dir=CONTAINER_WORKSPACE_PATH,

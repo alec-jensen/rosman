@@ -9,9 +9,11 @@ from docker.errors import APIError, ImageNotFound
 from rosman.config import parse_config
 from rosman.errors import ContainerError, RosmanError
 from rosman.lifecycle import (
+    DEVICE_GROUPS,
     IMAGE_GID,
     IMAGE_UID,
     ContainerManager,
+    ImageResult,
     compute_config_hash,
     render_dockerfile,
 )
@@ -149,6 +151,22 @@ def test_render_dockerfile_includes_entrypoint_and_world_writable_paths(tmp_path
     assert "chmod -R 0777 /workspace" in dockerfile
 
 
+def test_render_dockerfile_ensures_device_groups_exist(tmp_path: Path):
+    # Regression test: `--device` only grants cgroup-level access -- the
+    # device node's own Unix permissions (usually group-owned, e.g.
+    # dialout/video/disk at mode 0660) still block the container's non-root
+    # user without these groups actually existing in the image, since
+    # create_container's group_add=DEVICE_GROUPS has nothing to resolve
+    # against otherwise. Some minimal base_image overrides may not define
+    # all of them by default (unlike the stock ros:<distro> image), so the
+    # build must create whichever are missing rather than assume they exist.
+    config = make_config(tmp_path)
+    dockerfile = render_dockerfile(config)
+    match = re.search(r"for grp in (.*?); do", dockerfile)
+    assert match is not None, dockerfile
+    assert match.group(1).split() == DEVICE_GROUPS
+
+
 def make_manager(tmp_path: Path, client=None) -> ContainerManager:
     client = client or MagicMock()
     state = RosmanState.load(tmp_path / "state.json")
@@ -235,6 +253,46 @@ def test_push_image_raises_on_push_error_entry(tmp_path: Path):
 
     with pytest.raises(ContainerError, match="permission_denied"):
         manager.push_image(config)
+
+
+def test_create_container_grants_device_groups_when_devices_configured(
+    tmp_path: Path, monkeypatch
+):
+    # Regression test: `--device` alone only grants cgroup-level access to
+    # the node -- its own Unix permissions (typically group-owned, mode
+    # 0660) still blocked the container's non-root user from actually
+    # opening it without `group_add`. Caught live: a usbipd-attached USB
+    # device was visible via `rosman doctor`/`lsblk` inside the container
+    # but reading it raised "Permission denied" for the default user.
+    monkeypatch.setattr("rosman.lifecycle.state_dir", lambda: tmp_path)
+    monkeypatch.setattr("rosman.networking.state_dir", lambda: tmp_path)
+    client = MagicMock()
+    manager = make_manager(tmp_path, client)
+    monkeypatch.setattr(
+        manager, "ensure_image", lambda config, config_hash: ImageResult("tag", "cached")
+    )
+    config = make_config(tmp_path, 'devices: ["/dev/ttyUSB0"]\n')
+
+    manager.create_container(config)
+
+    _, kwargs = client.containers.create.call_args
+    assert kwargs["group_add"] == DEVICE_GROUPS
+
+
+def test_create_container_no_group_add_without_devices(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("rosman.lifecycle.state_dir", lambda: tmp_path)
+    monkeypatch.setattr("rosman.networking.state_dir", lambda: tmp_path)
+    client = MagicMock()
+    manager = make_manager(tmp_path, client)
+    monkeypatch.setattr(
+        manager, "ensure_image", lambda config, config_hash: ImageResult("tag", "cached")
+    )
+    config = make_config(tmp_path)
+
+    manager.create_container(config)
+
+    _, kwargs = client.containers.create.call_args
+    assert kwargs["group_add"] is None
 
 
 def test_push_image_wraps_api_error(tmp_path: Path):
