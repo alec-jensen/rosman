@@ -69,7 +69,14 @@ _rosman_complete() {
         IFS=$'\n' COMPREPLY=( $(printf '%s\n' "${COMPREPLY[@]}" | sort -u) )
         return
     fi
-    local words=("${COMP_WORDS[@]:1:COMP_CWORD}")
+    # Offset-only slice (no length): completion is end-of-line only (see
+    # module docstring), so COMP_CWORD is always the last index already --
+    # and a bash-style "offset:length" slice with a bare variable name in
+    # the length position (not a numeric literal) makes zsh's parser
+    # mistake the second ":" for the start of a history-modifier chain,
+    # even under bashcompinit. Confirmed: `${COMP_WORDS[@]:1:COMP_CWORD}`
+    # fails with "unrecognized modifier `C'" under a real zsh 5.9.
+    local words=("${COMP_WORDS[@]:1}")
     local out
     out=$(rosman __complete "${words[@]}" 2>/dev/null)
     COMPREPLY=()

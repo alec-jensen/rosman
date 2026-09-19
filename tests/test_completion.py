@@ -1,8 +1,11 @@
+import shutil
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from rosman.completion import build_inner_command, complete
+import pytest
+
+from rosman.completion import BASH_SCRIPT, ZSH_SCRIPT, build_inner_command, complete
 from rosman.config import parse_config
 
 
@@ -101,3 +104,50 @@ def test_complete_returns_empty_without_docker_binary(tmp_path: Path, monkeypatc
 
     result = complete(MagicMock(), MagicMock(), config, ["topic", "ec"])
     assert result == []
+
+
+def _run_completion_script(shell: str, script: str) -> subprocess.CompletedProcess:
+    """Actually sources the printed script and invokes the completion
+    function under a real shell interpreter -- a regression guard for the
+    exact bug class that shipped in v0.1.0: syntax that's valid bash but
+    breaks under zsh's own parser (even with bashcompinit loaded), which
+    the tests above can't catch since they never touch the shell-script
+    text itself, only the Python side."""
+    driver = f"""
+{script}
+COMP_WORDS=(rosman topic ec)
+COMP_CWORD=2
+COMP_LINE="rosman topic ec"
+COMP_POINT=${{#COMP_LINE}}
+_rosman_complete
+"""
+    return subprocess.run(
+        [shell, "-c", driver],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not on PATH")
+def test_bash_completion_script_has_no_syntax_errors():
+    # Not asserting on returncode: with no real `rosman`/container on PATH
+    # in this test environment, `_rosman_complete`'s trailing
+    # `[[ -n "$out" ]] && ...` naturally exits 1 (a false test, not an
+    # error) -- what matters here is that the shell's own parser didn't
+    # choke on the script.
+    result = _run_completion_script("bash", BASH_SCRIPT)
+    assert "unrecognized" not in result.stderr
+    assert "syntax error" not in result.stderr
+
+
+@pytest.mark.skipif(shutil.which("zsh") is None, reason="zsh not on PATH")
+def test_zsh_completion_script_has_no_syntax_errors():
+    # `compdef` is normally provided by `compinit`, irrelevant to this
+    # regression test -- stub it out rather than pull in a real zsh
+    # completion system just to source the script.
+    script = "compdef() { :; }\n" + ZSH_SCRIPT
+    result = _run_completion_script("zsh", script)
+    assert "unrecognized modifier" not in result.stderr
+    assert "parse error" not in result.stderr

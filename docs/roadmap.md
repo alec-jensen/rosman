@@ -557,3 +557,34 @@ the README, rather than the README growing indefinitely.
   `publish` only runs on push to `main`) — lower-stakes than the
   package-release pipeline's deliberate manual-tag-only trigger, so
   auto-publish on merge is fine here, matching normal docs-site practice.
+
+## Fix: zsh tab-completion syntax error (2026-09-19, v0.1.1)
+
+Real user report, first real-world use of tab-completion after v0.1.0:
+installing via the real dnf repo on Fedora, adding
+`eval "$(rosman completion zsh)"` to `~/.zshrc` (oh-my-zsh), every
+completion attempt printed `_rosman_complete:18: unrecognized modifier
+`C'` instead of completing.
+
+Root cause: `local words=("${COMP_WORDS[@]:1:COMP_CWORD}")` — bash's
+offset:length array slice, with the *length* given as a bare variable
+name (`COMP_CWORD`) rather than a numeric literal. bash evaluates that
+position arithmetically; zsh does not, and instead falls back to trying to
+parse `:COMP_CWORD` as a history-style modifier chain, taking just its
+first letter (`C`) and erroring since that's not a recognized modifier.
+This happens *even with `bashcompinit` loaded* — bashcompinit provides
+bash-compatible `complete`/`compgen` builtins and registers the function
+with zsh's completion system, but the function body itself is still
+parsed by zsh's own native parser, not a bash emulation layer. Reproduced
+locally with a real zsh 5.9 before touching anything, to confirm the fix
+actually works rather than guessing.
+
+Fixed by dropping the length field entirely
+(`"${COMP_WORDS[@]:1}"`) — correct because completion is already
+documented as end-of-line only, so `COMP_CWORD` is always the index of the
+last word anyway; an offset-only slice needs no length and doesn't hit
+this parsing path. Verified against a real running container in both a
+real `bash` and a real `zsh` process, not just the two unit tests that
+exercise `build_inner_command`/`complete` directly (those never touched
+the actual shell-script text, which is exactly how this shipped broken in
+v0.1.0 despite tests passing).
