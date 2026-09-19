@@ -774,9 +774,9 @@ package — their own entry points call it unconditionally at startup. rosman
 doesn't reimplement any of that completion logic; it relays the same
 protocol through the <code>docker exec</code> boundary: the installed shell function
 runs a hidden <code>rosman __complete</code> that reconstructs the equivalent <code>ros2
-...</code>/<code>colcon ...</code> command line, runs it inside your workspace's container
-with the environment variables <code>argcomplete</code> expects, and forwards the
-candidates back.</p>
+...</code>/<code>colcon ...</code>/<code>rosdep ...</code> command line, runs it inside your
+workspace's container with the environment variables <code>argcomplete</code>
+expects, and forwards the candidates back.</p>
 <h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Only works while the workspace container is already running (<code>rosman
@@ -784,8 +784,16 @@ candidates back.</p>
   Tab never starts a container by itself.</li>
 <li>Completion is end-of-line only — no mid-line editing awareness.</li>
 <li>The very first word after <code>rosman</code> merges rosman's own reserved commands
-  (<code>doctor</code>, <code>shell</code>, ...) with whatever <code>ros2</code> itself suggests, since
-  rosman can't tell which one you're typing from a short prefix alone.</li>
+  (<code>doctor</code>, <code>shell</code>, ...) with <code>colcon</code>/<code>rosdep</code> and whatever <code>ros2</code>
+  itself suggests, since rosman can't tell which one you're typing from a
+  short prefix alone.</li>
+<li><code>rosdep</code> itself isn't <code>argcomplete</code>-instrumented (unlike <code>ros2</code>/
+  <code>colcon</code>) — confirmed directly against a real container: it doesn't
+  respond to the completion protocol at all. So <code>rosman rosdep</code> completes
+  as a first word, but its own subcommands/flags (<code>update</code>, <code>install</code>,
+  <code>--from-paths</code>, ...) don't tab-complete beyond that. Nothing rosman can
+  fix short of writing its own <code>rosdep</code> completer, which would mean
+  reimplementing part of a tool rosman otherwise just forwards to.</li>
 </ul>
 
 

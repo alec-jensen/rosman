@@ -797,7 +797,21 @@ declares a dependency that isn't part of the default image — <code>colcon
 build</code> doesn't fail just because a pure-Python runtime import will later
 be missing. Run <code>rosman rosdep install</code> to resolve and install it (and
 lock it into <code>rosman.yml</code>'s built image via <code>rosman rebuild</code>) — see
-<a href="../guides/rosdep-lockfile/">Building from source</a>.</p>
+<a href="../guides/rosdep-lockfile/">Building from source</a>. Run this on a
+container you haven't manually poked at with <code>sudo apt install</code> by hand
+first (or <code>rosman rebuild</code> beforehand) — <code>rosdep install</code> checks what's
+<em>actually</em> installed in the current container, so an earlier manual
+install can make it correctly (if unhelpfully, for locking purposes)
+report "nothing to do" even though the package was never baked into the
+image.</p>
+<p><strong><code>colcon build</code> succeeds for a package cloned into <code>src/</code>, but running it
+fails with <code>AttributeError: __enter__</code> (or another API-shaped error) deep
+inside the package's own code.</strong> You likely cloned the wrong branch — ROS
+2 source repos maintain distro-specific branches (<code>humble</code>, <code>jazzy</code>, ...)
+because the API surface genuinely changes between distros, and the
+default branch usually tracks <code>rolling</code> (the newest, unstable API). Check
+which branch you're on, and re-clone with <code>git clone -b &lt;your_distro&gt;
+...</code> if it doesn't match your <code>rosman.yml</code>'s <code>ros_distro</code>.</p>
 <p><strong><code>ros2 topic list</code>/GUI apps don't show anything from another rosman
 project.</strong> Confirm both projects use the same <code>network:</code> group in their
 <code>rosman.yml</code> — only projects in the same group can discover each other.
