@@ -24,6 +24,24 @@ def test_render_dockerfile_default_uses_ros_image(tmp_path: Path):
     assert "COPY" not in dockerfile
 
 
+def test_render_dockerfile_sets_noninteractive_before_any_apt_install(tmp_path: Path):
+    # Regression test: on a bare Ubuntu base_image (unlike ros:<distro>,
+    # which already sets this), installing ca-certificates pulls in tzdata,
+    # whose postinst prompts interactively for a timezone -- and hangs
+    # forever in a non-interactive `docker build` with no TTY to answer it.
+    # Caught via an actual build hanging 20+ minutes on `dpkg --configure
+    # tzdata` before being traced to this. DEBIAN_FRONTEND must be set
+    # before the *first* `apt-get install` line, not just present somewhere.
+    config = make_config(tmp_path, "base_image: nvidia/cuda:12.4.1-devel-ubuntu22.04\n")
+    dockerfile = render_dockerfile(config, uid=1000, gid=1000)
+    env_index = dockerfile.index("ENV DEBIAN_FRONTEND=noninteractive")
+    # Match an actual `apt-get install` invocation, not this test file's own
+    # description of one -- a real prior bug in this test matched a comment.
+    first_install_match = re.search(r"^\s*(&&\s*)?apt-get install\b", dockerfile, re.MULTILINE)
+    assert first_install_match is not None, dockerfile
+    assert env_index < first_install_match.start()
+
+
 def test_render_dockerfile_with_base_image_installs_ros(tmp_path: Path):
     config = make_config(tmp_path, "base_image: nvidia/cuda:12.4.1-devel-ubuntu22.04\n")
     dockerfile = render_dockerfile(config, uid=1000, gid=1000)

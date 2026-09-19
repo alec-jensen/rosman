@@ -47,7 +47,7 @@ SETUP_SCRIPT_CONTAINER_NAME = "rosman-setup.sh"
 # fields, so without this a rosman upgrade that fixes something in the
 # template would silently leave existing users on their old, buggy cached
 # image forever -- `rosman up` would just find the old tag and reuse it.
-DOCKERFILE_TEMPLATE_VERSION = 3
+DOCKERFILE_TEMPLATE_VERSION = 4
 
 # Ubuntu codename ROS 2 apt packages are published under for each distro, used
 # only when `base_image` overrides the default `ros:<distro>` image and rosman
@@ -181,6 +181,17 @@ RUN rm /tmp/{SETUP_SCRIPT_CONTAINER_NAME}
 ARG USERNAME={DEFAULT_USERNAME}
 ARG USER_UID={uid}
 ARG USER_GID={gid}
+
+# Must come before any package installation below: on a bare Ubuntu/Debian
+# base (e.g. a `base_image` override like nvidia/cuda, which -- unlike
+# ros:<distro> -- doesn't set this itself), installing ca-certificates
+# pulls in tzdata as a dependency, and tzdata's postinst prompts
+# interactively for a timezone. In a non-interactive `docker build` that
+# has no TTY to answer it, this doesn't error out -- it hangs forever.
+# Found by an actual build hanging for 20+ minutes on
+# `dpkg --configure tzdata` before being traced to it.
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Etc/UTC
 {ros_install_block}
 RUN (getent group $USER_GID || groupadd --gid $USER_GID $USERNAME) \\
     && (getent passwd $USER_UID || \\
