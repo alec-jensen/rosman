@@ -192,6 +192,14 @@ jobs:
           '
 
       - name: Publish pacman repo
+        # repo-add's own `--sign` has no way to supply a passphrase
+        # non-interactively -- it shells out to gpg internally without
+        # --batch/--pinentry-mode, so a passphrase-protected key fails
+        # *silently* (a WARNING, not a fatal error, so the step reports
+        # success with no signature file at all). Sign explicitly
+        # afterward instead, the same way every other signing step in this
+        # workflow does it. Caught via a real test-tag run: pacman
+        # correctly refused to install without the .sig it never got.
         run: |
           mkdir -p public/pacman
           cp incoming/rosman-${VERSION}-1-x86_64.pkg.tar.zst public/pacman/
@@ -200,8 +208,14 @@ jobs:
             set -e
             pacman -Sy --noconfirm --needed pacman-contrib > /dev/null 2>&1
             cd /repo
-            GNUPGHOME=/gpghome repo-add --sign --key '"$GPG_KEY_ID"' \
-              rosman.db.tar.gz rosman-${VERSION}-1-x86_64.pkg.tar.zst
+            repo-add rosman.db.tar.gz rosman-${VERSION}-1-x86_64.pkg.tar.zst
+            for f in rosman.db.tar.gz rosman.files.tar.gz; do
+              gpg --homedir /gpghome --batch --pinentry-mode loopback \
+                --passphrase "${{ secrets.RELEASE_GPG_PASSPHRASE }}" --local-user '"$GPG_KEY_ID"' \
+                --detach-sign "$f"
+            done
+            ln -sf rosman.db.tar.gz.sig rosman.db.sig
+            ln -sf rosman.files.tar.gz.sig rosman.files.sig
           '
 
       - name: Commit and push gh-pages
