@@ -17,6 +17,7 @@ from rosman.lifecycle import (
     compute_config_hash,
     render_dockerfile,
 )
+from rosman.networking import dds_port_range
 from rosman.state import RosmanState
 
 
@@ -182,12 +183,13 @@ def test_ensure_image_returns_cached_when_local_image_exists(tmp_path: Path):
     result = manager.ensure_image(config, "abc123")
 
     assert result.source == "cached"
-    client.images.build.assert_not_called()
+    client.api.build.assert_not_called()
 
 
 def test_ensure_image_pulls_when_registry_image_available(tmp_path: Path):
     client = MagicMock()
     client.images.get.side_effect = ImageNotFound("not found locally")
+    client.api.pull.return_value = iter([{"status": "Pull complete", "id": "layer1"}])
     manager = make_manager(tmp_path, client)
     config = make_config(tmp_path, "registry_image: ghcr.io/team/proj\n")
 
@@ -195,32 +197,34 @@ def test_ensure_image_pulls_when_registry_image_available(tmp_path: Path):
 
     assert result.source == "pulled"
     assert result.tag == "ghcr.io/team/proj:abc123"
-    client.images.build.assert_not_called()
+    client.api.build.assert_not_called()
 
 
 def test_ensure_image_falls_back_to_build_when_pull_fails(tmp_path: Path):
     client = MagicMock()
     client.images.get.side_effect = ImageNotFound("not found locally")
-    client.images.pull.side_effect = ImageNotFound("not found in registry")
+    client.api.pull.side_effect = ImageNotFound("not found in registry")
+    client.api.build.return_value = iter([{"stream": "Successfully built abc123\n"}])
     manager = make_manager(tmp_path, client)
     config = make_config(tmp_path, "registry_image: ghcr.io/team/proj\n")
 
     result = manager.ensure_image(config, "abc123")
 
     assert result.source == "built"
-    client.images.build.assert_called_once()
+    client.api.build.assert_called_once()
 
 
 def test_ensure_image_builds_locally_without_registry_image(tmp_path: Path):
     client = MagicMock()
     client.images.get.side_effect = ImageNotFound("not found locally")
+    client.api.build.return_value = iter([{"stream": "Successfully built abc123\n"}])
     manager = make_manager(tmp_path, client)
     config = make_config(tmp_path)
 
     result = manager.ensure_image(config, "abc123")
 
     assert result.source == "built"
-    client.images.pull.assert_not_called()
+    client.api.pull.assert_not_called()
 
 
 def test_push_image_requires_registry_image_configured(tmp_path: Path):
@@ -269,7 +273,9 @@ def test_create_container_grants_device_groups_when_devices_configured(
     client = MagicMock()
     manager = make_manager(tmp_path, client)
     monkeypatch.setattr(
-        manager, "ensure_image", lambda config, config_hash: ImageResult("tag", "cached")
+        manager,
+        "ensure_image",
+        lambda config, config_hash, reporter=None: ImageResult("tag", "cached"),
     )
     config = make_config(tmp_path, 'devices: ["/dev/ttyUSB0"]\n')
 
@@ -285,7 +291,9 @@ def test_create_container_no_group_add_without_devices(tmp_path: Path, monkeypat
     client = MagicMock()
     manager = make_manager(tmp_path, client)
     monkeypatch.setattr(
-        manager, "ensure_image", lambda config, config_hash: ImageResult("tag", "cached")
+        manager,
+        "ensure_image",
+        lambda config, config_hash, reporter=None: ImageResult("tag", "cached"),
     )
     config = make_config(tmp_path)
 
@@ -293,6 +301,45 @@ def test_create_container_no_group_add_without_devices(tmp_path: Path, monkeypat
 
     _, kwargs = client.containers.create.call_args
     assert kwargs["group_add"] is None
+
+
+def test_create_container_publishes_dds_ports_when_remote_peers_configured(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr("rosman.lifecycle.state_dir", lambda: tmp_path)
+    monkeypatch.setattr("rosman.networking.state_dir", lambda: tmp_path)
+    client = MagicMock()
+    manager = make_manager(tmp_path, client)
+    monkeypatch.setattr(
+        manager,
+        "ensure_image",
+        lambda config, config_hash, reporter=None: ImageResult("tag", "cached"),
+    )
+    config = make_config(tmp_path, 'domain_id: 5\nremote_peers: ["192.168.1.51"]\n')
+
+    manager.create_container(config)
+
+    _, kwargs = client.containers.create.call_args
+    expected = {f"{p}/udp": p for p in dds_port_range(5)}
+    assert kwargs["ports"] == expected
+
+
+def test_create_container_no_ports_without_remote_peers(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("rosman.lifecycle.state_dir", lambda: tmp_path)
+    monkeypatch.setattr("rosman.networking.state_dir", lambda: tmp_path)
+    client = MagicMock()
+    manager = make_manager(tmp_path, client)
+    monkeypatch.setattr(
+        manager,
+        "ensure_image",
+        lambda config, config_hash, reporter=None: ImageResult("tag", "cached"),
+    )
+    config = make_config(tmp_path)
+
+    manager.create_container(config)
+
+    _, kwargs = client.containers.create.call_args
+    assert kwargs["ports"] is None
 
 
 def test_push_image_wraps_api_error(tmp_path: Path):

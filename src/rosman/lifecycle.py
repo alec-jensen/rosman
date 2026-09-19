@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import docker
-from docker.errors import APIError, BuildError, ImageNotFound, NotFound
+from docker.errors import APIError, ImageNotFound, NotFound
 from docker.types import DeviceRequest
 
 from rosman.config import RosmanConfig
@@ -43,10 +43,12 @@ from rosman.naming import container_name, image_name, volume_name, workspace_has
 from rosman.networking import (
     CYCLONEDDS_CONTAINER_PATH,
     RMW_IMPLEMENTATION_ENV,
+    dds_port_range,
     ensure_network,
     refresh_peers,
 )
 from rosman.platform_support import gui_passthrough
+from rosman.progress import DockerStreamError, NullReporter, ProgressReporter
 from rosman.state import RosmanState, state_dir
 
 CONTAINER_WORKSPACE_PATH = "/workspace"
@@ -340,7 +342,13 @@ class ContainerManager:
 
     # -- image -----------------------------------------------------------
 
-    def ensure_image(self, config: RosmanConfig, config_hash: str) -> ImageResult:
+    def ensure_image(
+        self,
+        config: RosmanConfig,
+        config_hash: str,
+        reporter: ProgressReporter | None = None,
+    ) -> ImageResult:
+        reporter = reporter or NullReporter()
         tag = image_name(
             config.workspace_root, config.ros_distro, config_hash, config.registry_image
         )
@@ -352,9 +360,10 @@ class ContainerManager:
 
         if config.registry_image:
             try:
-                self.client.images.pull(tag)
+                pull_stream = self.client.api.pull(tag, stream=True, decode=True)
+                reporter.pull(pull_stream)
                 return ImageResult(tag=tag, source="pulled")
-            except (ImageNotFound, APIError):
+            except (APIError, DockerStreamError):
                 # Not pushed yet, or no registry access -- fall back to a
                 # local build below rather than failing `rosman up` outright.
                 pass
@@ -375,8 +384,11 @@ class ContainerManager:
             if setup_script_source is not None:
                 shutil.copy(setup_script_source, build_dir / SETUP_SCRIPT_CONTAINER_NAME)
             try:
-                self.client.images.build(path=str(build_dir), tag=tag, rm=True)
-            except BuildError as exc:
+                build_stream = self.client.api.build(
+                    path=str(build_dir), tag=tag, rm=True, decode=True
+                )
+                reporter.build(build_stream)
+            except (APIError, DockerStreamError) as exc:
                 base = config.base_image or f"ros:{config.ros_distro}"
                 raise ContainerError(
                     f"Failed to build image for ros_distro '{config.ros_distro}': {exc}\n"
@@ -385,7 +397,9 @@ class ContainerManager:
                 ) from exc
         return ImageResult(tag=tag, source="built")
 
-    def push_image(self, config: RosmanConfig) -> str:
+    def push_image(
+        self, config: RosmanConfig, reporter: ProgressReporter | None = None
+    ) -> str:
         """Build (if needed) and push the workspace's image to
         `registry_image`, so teammates' `rosman up` can pull it instead of
         building locally. Requires the registry credentials to already be
@@ -396,17 +410,13 @@ class ContainerManager:
                 "Set 'registry_image' in rosman.yml before running `rosman push` "
                 "(e.g. registry_image: ghcr.io/my-team/my-project)."
             )
+        reporter = reporter or NullReporter()
         config_hash = compute_config_hash(config)
-        result = self.ensure_image(config, config_hash)
+        result = self.ensure_image(config, config_hash, reporter=reporter)
         try:
             push_log = self.client.images.push(result.tag, stream=True, decode=True)
-            for entry in push_log:
-                if "error" in entry:
-                    raise ContainerError(
-                        f"Failed to push {result.tag}: {entry['error']}\n"
-                        f"Make sure you're logged in: `docker login` against that registry."
-                    )
-        except APIError as exc:
+            reporter.push(push_log)
+        except (APIError, DockerStreamError) as exc:
             raise ContainerError(
                 f"Failed to push {result.tag}: {exc}\n"
                 f"Make sure you're logged in: `docker login` against that registry."
@@ -465,17 +475,19 @@ class ContainerManager:
 
     # -- create / start ----------------------------------------------------
 
-    def create_container(self, config: RosmanConfig):
+    def create_container(
+        self, config: RosmanConfig, reporter: ProgressReporter | None = None
+    ):
         uid, gid = host_uid_gid()
         config_hash = compute_config_hash(config)
-        image_result = self.ensure_image(config, config_hash)
+        image_result = self.ensure_image(config, config_hash, reporter=reporter)
         self.last_image_result = image_result
         image_tag = image_result.tag
         domain_id = self.resolve_domain_id(config)
         name = container_name(config.workspace_root)
 
         ensure_network(self.client, config.network)
-        cyclonedds_path = refresh_peers(self.client, config.network)
+        cyclonedds_path = refresh_peers(self.client, config.network, config.remote_peers)
 
         volumes = {
             str(config.workspace_root): {"bind": CONTAINER_WORKSPACE_PATH, "mode": "rw"},
@@ -513,6 +525,15 @@ class ContainerManager:
             environment.update(gui.environment)
             volumes.update(gui.volumes)
 
+        # LAN multi-host discovery (`remote_peers`): publish the Cyclone DDS
+        # port window 1:1 so its self-advertised port numbers stay valid
+        # once NAT'd through Docker's port publishing. See dds_port_range's
+        # docstring and networking.py's module docstring for why this is
+        # safe to derive with no coordination with the remote machine.
+        ports = None
+        if config.remote_peers:
+            ports = {f"{port}/udp": port for port in dds_port_range(domain_id)}
+
         labels = {
             MANAGED_LABEL: "true",
             WORKSPACE_LABEL: str(config.workspace_root),
@@ -535,6 +556,7 @@ class ContainerManager:
             devices=devices,
             device_requests=device_requests,
             group_add=group_add,
+            ports=ports,
             restart_policy={"Name": config.restart_policy},
             labels=labels,
             working_dir=CONTAINER_WORKSPACE_PATH,
@@ -543,7 +565,7 @@ class ContainerManager:
         network = ensure_network(self.client, config.network)
         network.connect(container, aliases=[name])
         container.start()
-        refresh_peers(self.client, config.network)
+        refresh_peers(self.client, config.network, config.remote_peers)
         self.state.set_container_name(config.workspace_root, name)
         return container
 
@@ -554,14 +576,14 @@ class ContainerManager:
         except NotFound:
             return False
 
-    def ensure_running(self, config: RosmanConfig):
+    def ensure_running(self, config: RosmanConfig, reporter: ProgressReporter | None = None):
         """Find-or-create the workspace container and make sure it's started.
 
         Returns (container, created: bool).
         """
         container = self.find_container(config)
         if container is None:
-            return self.create_container(config), True
+            return self.create_container(config, reporter=reporter), True
 
         container.reload()
         if container.status != "running":
@@ -584,7 +606,7 @@ class ContainerManager:
         if container is None:
             return False
         container.remove(force=True)
-        refresh_peers(self.client, config.network)
+        refresh_peers(self.client, config.network, config.remote_peers)
         gui_dir = state_dir() / "gui" / workspace_hash(config.workspace_root)
         if gui_dir.exists():
             for f in gui_dir.iterdir():
@@ -592,7 +614,7 @@ class ContainerManager:
             gui_dir.rmdir()
         return True
 
-    def rebuild(self, config: RosmanConfig):
+    def rebuild(self, config: RosmanConfig, reporter: ProgressReporter | None = None):
         """Force-recreate the container (and its image, if config changed)."""
         self.remove(config)
-        return self.create_container(config)
+        return self.create_container(config, reporter=reporter)

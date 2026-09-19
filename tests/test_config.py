@@ -145,6 +145,38 @@ def test_empty_registry_image_is_rejected(tmp_path: Path):
         parse_config('ros_distro: humble\nregistry_image: ""\n', path)
 
 
+def test_remote_peers_defaults_to_empty(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    config = parse_config(MINIMAL, path)
+    assert config.remote_peers == []
+
+
+def test_remote_peers_parses_with_explicit_domain_id(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    text = "ros_distro: humble\ndomain_id: 5\nremote_peers: [\"192.168.1.51\"]\n"
+    config = parse_config(text, path)
+    assert config.remote_peers == ["192.168.1.51"]
+    assert config.domain_id == 5
+
+
+def test_remote_peers_rejects_auto_domain_id(tmp_path: Path):
+    # An auto-assigned domain_id is chosen independently on each machine, so
+    # two machines running the same rosman.yml could silently end up on
+    # different domains and never discover each other -- this must be a
+    # loud config error, not a quiet runtime failure.
+    path = tmp_path / "rosman.yml"
+    text = "ros_distro: humble\nremote_peers: [\"192.168.1.51\"]\n"
+    with pytest.raises(ConfigError, match="domain_id"):
+        parse_config(text, path)
+
+
+def test_remote_peers_rejects_non_string_list(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    text = "ros_distro: humble\ndomain_id: 5\nremote_peers: [1, 2]\n"
+    with pytest.raises(ConfigError, match="remote_peers"):
+        parse_config(text, path)
+
+
 def test_missing_required_field(tmp_path: Path):
     path = tmp_path / "rosman.yml"
     with pytest.raises(ConfigError, match="ros_distro"):

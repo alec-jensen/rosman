@@ -55,6 +55,7 @@ _DEFAULTS: dict[str, Any] = {
     "base_image": None,
     "setup_script": None,
     "registry_image": None,
+    "remote_peers": [],
 }
 
 
@@ -74,6 +75,7 @@ class RosmanConfig:
     base_image: str | None = None
     setup_script: str | None = None
     registry_image: str | None = None
+    remote_peers: list[str] = field(default_factory=list)
 
     # Not part of the YAML schema — filled in by the loader.
     config_path: Path = field(default=None, repr=False)  # type: ignore[assignment]
@@ -162,6 +164,16 @@ def _validate_registry_image(value: Any, path: Path) -> str | None:
         raise ConfigError(
             f"{path}: 'registry_image' must not include a tag ({value!r}) -- rosman "
             "appends its own config-hash tag so pulls/pushes stay in sync with rosman.yml."
+        )
+    return value
+
+
+def _validate_remote_peers(value: Any, path: Path) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
+        raise ConfigError(
+            f"{path}: 'remote_peers' must be a list of non-empty host/IP strings "
+            "on your LAN, e.g. [\"192.168.1.51\"]. Run `rosman doctor` on the other "
+            "machine to see the address to put here."
         )
     return value
 
@@ -270,10 +282,22 @@ def _build_config(data: dict[str, Any], path: Path) -> RosmanConfig:
             f"(got {restart_policy!r})."
         )
 
+    domain_id = _validate_domain_id(data.get("domain_id", _DEFAULTS["domain_id"]), path)
+    remote_peers = _validate_remote_peers(
+        data.get("remote_peers", list(_DEFAULTS["remote_peers"])), path
+    )
+    if remote_peers and domain_id == "auto":
+        raise ConfigError(
+            f"{path}: 'domain_id' must be an explicit integer (not \"auto\") when "
+            "'remote_peers' is set. Auto-assigned domain ids are chosen "
+            "independently on each machine and won't match across hosts, which "
+            "would silently break discovery instead of just failing loudly here."
+        )
+
     return RosmanConfig(
         ros_distro=ros_distro,
         rmw_implementation=rmw,
-        domain_id=_validate_domain_id(data.get("domain_id", _DEFAULTS["domain_id"]), path),
+        domain_id=domain_id,
         network=network,
         gpu=gpu,
         devices=_validate_devices(data.get("devices", list(_DEFAULTS["devices"])), path),
@@ -289,6 +313,7 @@ def _build_config(data: dict[str, Any], path: Path) -> RosmanConfig:
         registry_image=_validate_registry_image(
             data.get("registry_image", _DEFAULTS["registry_image"]), path
         ),
+        remote_peers=remote_peers,
         config_path=path,
     )
 

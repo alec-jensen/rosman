@@ -27,6 +27,8 @@ from rosman.lifecycle import ContainerManager, compute_config_hash
 from rosman.networking import (
     CYCLONEDDS_CONTAINER_PATH,
     RMW_IMPLEMENTATION_ENV,
+    dds_port_range,
+    detect_lan_ip,
     ensure_network,
     refresh_peers,
 )
@@ -117,6 +119,30 @@ def run_checks(config: RosmanConfig, network_check: bool = False) -> list[Check]
                 checks.append(Check(f"device {device}", False, _usbipd_hint(device)))
             else:
                 checks.append(Check(f"device {device}", False, "not visible on this host"))
+
+    if config.remote_peers:
+        lan_ip = detect_lan_ip()
+        port_range = dds_port_range(manager.resolve_domain_id(config))
+        ports = f"{port_range.start}-{port_range.stop - 1}"
+        if lan_ip:
+            checks.append(
+                Check(
+                    "multi-host (LAN)",
+                    True,
+                    f"this machine's address for teammates' remote_peers: {lan_ip} -- "
+                    f"needs UDP {ports} reachable between machines (not independently "
+                    "verified here; firewalls are the usual culprit)",
+                )
+            )
+        else:
+            checks.append(
+                Check(
+                    "multi-host (LAN)",
+                    False,
+                    "could not detect a LAN IP for this machine (no outbound route) -- "
+                    f"multi-host discovery needs one, and needs UDP {ports} reachable",
+                )
+            )
 
     if network_check:
         checks.append(run_network_roundtrip(client, manager, config))

@@ -1,0 +1,86 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "documentation/**"
+      - "mkdocs.yml"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "documentation/**"
+      - "mkdocs.yml"
+      - ".github/workflows/docs.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --group docs
+
+      - name: Build docs (strict -- fails on broken nav/links)
+        run: uv run mkdocs build --strict
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --group docs
+
+      - name: Build docs
+        run: uv run mkdocs build --strict
+
+      - name: Checkout (or create) gh-pages branch
+        run: |
+          if git ls-remote --exit-code --heads origin gh-pages > /dev/null 2>&1; then
+            git fetch origin gh-pages
+            git worktree add public origin/gh-pages
+          else
+            git worktree add --orphan -b gh-pages public
+            git -C public rm -rf . > /dev/null 2>&1 || true
+          fi
+
+      - name: Publish built site
+        # This branch also hosts the signed apt/dnf/pacman package repos
+        # published by release.yml, at apt/, dnf/, pacman/, rosman.gpg*.
+        # rsync (no --delete) only ever adds/updates files here, so a
+        # docs-only push can never take those down -- and never add an
+        # mkdocs nav page that would resolve to apt/, dnf/, or pacman/ at
+        # the site root, for the same reason.
+        run: |
+          rsync -a --exclude='apt' --exclude='dnf' --exclude='pacman' \
+            --exclude='rosman.gpg' --exclude='rosman.gpg.asc' --exclude='.git' \
+            site/ public/
+
+      - name: Commit and push gh-pages
+        run: |
+          cd public
+          git config user.name "rosman-docs-bot"
+          git config user.email "actions@github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to publish."
+            exit 0
+          fi
+          git commit -m "Publish docs site"
+          git push origin HEAD:gh-pages

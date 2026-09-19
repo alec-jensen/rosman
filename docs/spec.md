@@ -344,3 +344,92 @@ acceptable because the threat model here is a personal/team dev container
 someone already has `docker exec` access to, not a multi-tenant system —
 but it's a deliberate tradeoff, not an oversight, and worth knowing about
 if that threat model is ever wrong for a given project.
+
+---
+
+## Addendum (2026-09-19, part 3): multi-host discovery, LAN only, no VPN
+
+The original spec deferred multi-host discovery as needing "something like
+a VPN mesh (e.g. Husarnet) layered on top." Revisited once base/single-host
+usage was solid; the VPN-mesh option was offered and explicitly declined —
+Alec's words: "dont want to have to use vpns. it should just work over
+lan." So this extends the *existing* bridge-network-plus-CycloneDDS-peers
+mechanism (§5) with LAN-reachable entries, rather than introducing a new
+transport or a coordination service:
+
+- `rosman.yml` gets `remote_peers: [ip, ...]` — LAN addresses of other
+  machines' rosman containers for the same project, added to the generated
+  CycloneDDS peers XML alongside the existing local (same-host,
+  Docker-DNS-resolved) container names.
+- `remote_peers` requires an **explicit, non-`"auto"` `domain_id`**.
+  `domain_id: auto` is assigned independently per machine (state.py, keyed
+  off each machine's own absolute workspace path) — two machines running
+  the identical checked-in `rosman.yml` could silently land on different
+  domains and simply never discover each other. Config validation rejects
+  this combination outright rather than letting it fail silently at
+  runtime, matching this project's general bias (see `rosman doctor`) for
+  loud config-time errors over quiet DDS discovery failures nobody notices
+  until a robot doesn't respond.
+- Making a container's DDS traffic reachable from another *host* (not just
+  another container on the same Docker bridge) means it has to be
+  published through to the real machine, which requires knowing the exact
+  UDP port(s) in advance for Docker's `-p` port publishing — and Cyclone
+  DDS embeds its own bound port number inside its SPDP discovery payload,
+  so the published host-side port must be numerically identical to the
+  container-internal one, or a NAT'd rewrite would make that self-reported
+  port unreachable from outside. Solved by *mirroring* Cyclone's own
+  default port formula (`PB=7400 + DG=250 * domain_id + PG=2 *
+  participant_index + offset(0-3)`, see `networking.dds_port_range`)
+  instead of overriding it — since `domain_id` is now guaranteed identical
+  on every machine (previous bullet), every machine independently computes
+  the *same* port window with zero coordination or handshake, and rosman
+  just publishes that whole window 1:1.
+- `rosman doctor` gains a check that prints this machine's LAN IP
+  (best-effort local route lookup, no packets sent) and the exact UDP port
+  range that needs to be reachable, so setting up a teammate's
+  `remote_peers` doesn't require guessing.
+- Not attempted: any actual reachability/firewall verification, or dynamic
+  peer discovery (e.g. mDNS) — `remote_peers` stays a manually maintained
+  list, matching how local peers were already handled (an explicit,
+  generated list, not broadcast discovery) rather than introducing a new
+  paradigm.
+
+---
+
+## Addendum (2026-09-19, part 4): shell tab-completion, supersedes §7/§9
+
+§7 and §9 both explicitly scoped shell tab-completion for the passthrough
+case out of MVP, on the (correct, at the time) assumption that it's not
+required to work and would be revisited later. Revisited the same day as
+the addenda above, prompted by: "how could we make tab completions
+possible?"
+
+Feasibility was checked empirically against a real running container
+*before* writing any completion code, rather than assumed: `ros2` and
+`colcon` both turned out to already be `argcomplete`-instrumented (their
+own Python entry points call `argcomplete.autocomplete()` unconditionally
+at startup — found by locating `ros2-argcomplete.bash`/
+`colcon-argcomplete.bash` inside a real image, then manually driving the
+raw protocol with `_ARGCOMPLETE=1`/`COMP_LINE`/`COMP_POINT` env vars
+directly against the `ros2`/`colcon` binaries: `ros2 to` → `topic`,
+`ros2 topic echo ` → real live topic names, `colcon bui` → `build`). This
+meant rosman didn't need to reimplement any part of `ros2`'s completion
+tree (which would have violated the thin-passthrough principle in §2) —
+just relay the same protocol through the `docker exec` boundary:
+
+- The installed shell function (`rosman completion bash`/`zsh`) calls a
+  hidden `rosman __complete <words...>`, which reconstructs the equivalent
+  inner `ros2`/`colcon` command line (the same rule §7's passthrough
+  dispatch already uses) and runs it inside the container with the
+  argcomplete env vars set, relaying the IFS-separated candidates back.
+- Must never trigger the container auto-start behavior (see roadmap.md's
+  "Auto-start UX" entry) — completion uses `find_container` and a short
+  subprocess timeout, never `ensure_running`, and every failure mode
+  silently yields zero candidates rather than an error or a hang. Pressing
+  Tab is not a "start my workspace" action.
+- Known gap, not attempted: completion is end-of-line only (no
+  `COMP_POINT`-aware mid-line editing), and the very first word of a
+  passthrough call can't distinguish "start of a reserved rosman command"
+  from "start of a ros2/colcon verb" without the user having typed enough
+  to disambiguate — both candidate sources are just merged for that one
+  position.

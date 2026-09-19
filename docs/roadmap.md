@@ -417,7 +417,143 @@ to infer from test/CI status alone.
 - macOS.
 - Full `ros2`/`colcon` CLI reimplementation (rosman is a thin passthrough
   by design).
-- Shell tab-completion through the container.
-- Multi-host DDS discovery over the internet (would need a VPN mesh, e.g.
-  Husarnet, layered on top — out of scope for a single dev machine).
+- Multi-host discovery over the internet via a VPN mesh (e.g. Husarnet) —
+  declined outright, not just deferred; see the 2026-09-19 multi-host
+  section below and spec.md's third addendum. LAN-only multi-host
+  (`remote_peers`) is implemented.
 - ROS 1.
+
+## Shell tab-completion (2026-09-19)
+
+"how could we make tab completions possible?" Verified feasibility
+empirically against a real running container before building anything:
+`ros2` and `colcon` are both already `argcomplete`-instrumented (their own
+Python entry points call `argcomplete.autocomplete()` unconditionally at
+startup — confirmed by finding `ros2-argcomplete.bash`/
+`colcon-argcomplete.bash` in a real image and manually driving the
+protocol with `_ARGCOMPLETE=1`/`COMP_LINE`/`COMP_POINT` env vars against
+`ros2 to` -> `topic`, `ros2 topic echo ` -> real live topic names
+(`/parameter_events`, `/rosout`), and `colcon bui` -> `build`). So rosman
+doesn't reimplement any completion logic, just relays that same protocol
+through the `docker exec` boundary (`rosman/completion.py`):
+
+- `rosman completion bash`/`zsh` prints an install script
+  (`eval "$(rosman completion bash)"` in `.bashrc`); zsh reuses the bash
+  function via `bashcompinit`, the same pattern colcon/ros2's own `.zsh`
+  hooks use.
+- The installed shell function calls a hidden `rosman __complete
+  <words...>` for the actual work, which reconstructs the equivalent
+  `ros2 ...`/`colcon ...` line (mirroring `dispatch_passthrough`'s own
+  rule) and runs it inside the container with the argcomplete env vars,
+  relaying the IFS-separated candidates back to stdout.
+- Deliberately uses `find_container` (never `ensure_running`) and a 3s
+  subprocess timeout — pressing Tab must never auto-start or block on a
+  container build, and any failure (no config, no container, container
+  not running, docker error, timeout) silently yields zero candidates.
+- The one hidden command (`__complete`) is excluded from
+  `_maybe_show_update_notice()` too — that check firing on every keystroke
+  would be bizarre.
+- Live-verified end-to-end, not just unit-tested: a real bash session
+  sourcing the printed completion script, driving `_rosman_complete`
+  directly against a real running container, confirmed `rosman do` ->
+  `doctor`/`down` (deduped against `ros2`'s own real `doctor` subcommand,
+  which collides with rosman's reserved `doctor` by coincidence),
+  `rosman topic ec` -> `echo`, and `rosman colcon bui` -> `build`.
+
+## Auto-start UX + progress rendering (2026-09-19)
+
+Two related fixes/features from the same ask ("it should automatically
+start the containers when needed, without explicitly needing a `rosman
+up`", plus "progress spinners/bars... whenever something will take more
+than a few seconds"):
+
+- **Real bug found and fixed**: `cmd_passthrough`/`cmd_shell` already
+  called `ContainerManager.ensure_running`, which *did* auto-create a
+  container on first use — but the "Starting rosman container..." status
+  message was printed *after* `ensure_running()` returned, i.e. after the
+  (potentially slow, first-time) build had already finished. During that
+  build, the command produced zero output, indistinguishable from a hang.
+  Fixed with `cli._ensure_running_with_notice`, which checks
+  `find_container()` itself and prints the notice *before* calling
+  `create_container()`.
+- **Progress rendering** (`rosman/progress.py`): image build/pull/push all
+  switched from docker-py's high-level, fully-blocking
+  `images.build()`/`images.pull()` (which don't return until the whole
+  operation finishes, so no live progress is possible through them at
+  all — confirmed by reading docker-py's own source) to the low-level
+  `client.api.build()`/`client.api.pull()` streaming generators, decoded
+  and rendered live via `rich.progress`: a spinner showing the current
+  build-log line for `build` (no byte-level progress exists for build
+  steps), and real per-layer byte progress bars for `pull`/`push` (Docker
+  reports `progressDetail.current`/`total` per layer `id` for those).
+  `push` already streamed under the high-level API (`ImageCollection.push`
+  is a thin passthrough) so only its rendering needed adding, not its
+  transport. A `NullReporter` (drains the same stream silently, still
+  raising on `{"error": ...}` entries) keeps `lifecycle.py` renderer-
+  agnostic and the existing mocked tests working unchanged in shape.
+  Live-verified: a forced-terminal smoke test rendering both a fake
+  layered pull and a fake build stream, and a real fresh-workspace
+  `rosman topic list` run confirming the notice now prints before the
+  build starts.
+
+## Multi-host discovery, LAN only (2026-09-19)
+
+"we need multihost support" — clarified via a follow-up question that a
+VPN mesh (the original spec's suggestion, e.g. Husarnet) was explicitly
+unwanted: "dont want to have to use vpns. it should just work over lan."
+Full design in spec.md's third addendum; summary:
+
+- New `remote_peers: [ip, ...]` config field, added to the existing
+  CycloneDDS peers XML alongside local same-host container names (same
+  mechanism, not a new one).
+- Requires an explicit (non-`"auto"`) `domain_id` — enforced as a config
+  error, not a runtime footgun, since two machines' independently
+  auto-assigned domain ids would otherwise silently never match.
+- `lifecycle.create_container` publishes a UDP port window 1:1
+  (`networking.dds_port_range`, mirrors Cyclone DDS's own default port
+  formula so every machine derives the identical window from `domain_id`
+  alone, no coordination needed) whenever `remote_peers` is set; no
+  behavior or port exposure change for projects that don't set it.
+- `rosman doctor` gained a check (`networking.detect_lan_ip`) that prints
+  this machine's LAN address and the exact port range a teammate's
+  firewall needs to allow.
+- Live-verified: a real workspace with `remote_peers` set correctly showed
+  this machine's actual LAN IP and the computed port range via `rosman
+  doctor`, and a `remote_peers` config with `domain_id: auto` was
+  correctly rejected at config-parse time with a clear error.
+
+## MkDocs documentation site (2026-09-19)
+
+"create mkdocs wiki/documentation/examples" — a proper docs site alongside
+the README, rather than the README growing indefinitely.
+
+- Source lives in `documentation/` (deliberately not `docs/`, which
+  already holds the internal spec/roadmap you're reading), built with
+  `mkdocs` + `mkdocs-material` (new `docs` dependency group in
+  `pyproject.toml`, kept separate from `dev` since it's not needed for
+  day-to-day development).
+- Structure: a home page, a getting-started walkthrough, a full config
+  reference, one guide per major feature (custom images, team-shared
+  images, multi-host, tab-completion, GPU/GUI/devices), a set of complete
+  example `rosman.yml` files, and a troubleshooting page written from the
+  real issues this project's own live-verification work actually hit
+  (the `tzdata` interactive-prompt hang, config drift, WSL2 USB devices,
+  etc.) reframed as user-facing fixes rather than a development diary.
+  `uv run mkdocs build --strict` catches broken nav entries/internal links
+  as part of CI.
+- **Publishing target required care, not just `mkdocs gh-deploy`**: the
+  `gh-pages` branch already hosts the real signed apt/dnf/pacman package
+  repos (published by `release.yml`) at `apt/`, `dnf/`, `pacman/`,
+  `rosman.gpg*` — and `mkdocs gh-deploy` (via `ghp-import`) replaces an
+  entire branch's content by default, which would have destroyed them.
+  `.github/workflows/docs.yml` instead reuses release.yml's own safe
+  worktree-checkout pattern and `rsync`s the built site in with explicit
+  excludes for those paths (no `--delete`), so a docs-only publish can
+  never take down the package repos, and vice versa. The docs site
+  becomes the actual `https://alec-jensen.github.io/rosman/` landing page
+  (that root had no `index.html` before this), while the package repos
+  keep their existing subpaths untouched.
+- Two-job split (`build` runs on every PR touching docs as a check;
+  `publish` only runs on push to `main`) — lower-stakes than the
+  package-release pipeline's deliberate manual-tag-only trigger, so
+  auto-publish on merge is fine here, matching normal docs-site practice.

@@ -43,6 +43,10 @@ dev = [
     "mypy>=1.11.0",
     "types-PyYAML",
 ]
+docs = [
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.5.0",
+]
 
 [tool.ruff]
 line-length = 100

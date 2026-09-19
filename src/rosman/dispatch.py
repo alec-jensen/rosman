@@ -33,6 +33,8 @@ RESERVED_COMMANDS = {
     "doctor",
     "shell",
     "push",
+    "completion",
+    "__complete",
     "help",
 }
 

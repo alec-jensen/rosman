@@ -15,6 +15,9 @@ core workflow runs natively on Windows without WSL2; WSL2 is only needed
 for GUI passthrough (WSLg) and USB device attachment (usbipd-win). macOS
 is not supported.
 
+Full documentation, guides, and examples:
+**[alec-jensen.github.io/rosman](https://alec-jensen.github.io/rosman/)**
+
 ## Installation
 
 Prebuilt packages are published to `https://alec-jensen.github.io/rosman/`
@@ -102,6 +105,7 @@ restart_policy: "no"          # docker restart policy: "no" (default), "unless-s
 base_image: null              # optional -- override the default `ros:<distro>` base image
 setup_script: null            # optional -- path to a shell script rosman runs during the image build
 registry_image: null          # optional -- share one built image across a team; see below
+remote_peers: []              # optional -- LAN IPs of other machines' rosman containers; see below
 ```
 
 ### Per-machine overrides: `rosman.local.yml`
@@ -165,6 +169,36 @@ fixed internal identity, not whoever built it — each machine's actual
 host UID/GID is applied at container runtime, so bind-mounted files still
 come out correctly owned regardless of who built the shared image.
 
+### Multi-host (LAN)
+
+For talking to a real robot on the same network — no VPN, LAN only:
+
+```yaml
+domain_id: 5                         # required -- must be an explicit int, not "auto"
+remote_peers: ["192.168.1.51"]       # LAN IP(s) of the other machine(s)
+```
+
+Run `rosman doctor` on each machine to see the address to put in the
+others' `remote_peers`, and the UDP port range that needs to be reachable
+between them (rosman publishes it automatically; a firewall in between is
+the usual reason it doesn't work). `domain_id` must be an explicit,
+matching integer on every machine — `"auto"` is assigned independently per
+machine and won't line up across hosts, so rosman rejects it outright when
+`remote_peers` is set rather than failing silently at discovery time.
+
+## Shell tab-completion
+
+```sh
+echo 'eval "$(rosman completion bash)"' >> ~/.bashrc   # or: completion zsh >> ~/.zshrc
+```
+
+Completes `ros2`/`colcon` subcommands, flags, and dynamic values (topic
+names, node names, etc.) exactly as they would inside the container —
+`ros2`/`colcon` are `argcomplete`-instrumented already, so rosman just
+relays the completion request through `docker exec` rather than
+reimplementing any of it. Only works while the workspace container is
+already running (`rosman up`); pressing Tab never starts one.
+
 ## Design decisions
 
 - **Bridge network + CycloneDDS unicast peers, not `--network host`.**
@@ -184,10 +218,10 @@ See [`docs/spec.md`](docs/spec.md) for the full design spec, and
 ## Known limitations
 
 - macOS is not supported and won't be.
-- No shell tab-completion for `ros2`/`colcon` passthrough — it doesn't
-  survive the `docker exec` boundary.
-- No multi-host DDS discovery — rosman targets multiple containers on one
-  dev machine, not a robot reachable over a network.
+- Tab-completion only works while the container is already running, and
+  only completes at the end of the line (no mid-line editing).
+- Multi-host discovery is LAN-only (`remote_peers`); there's no VPN mesh
+  integration for reaching a machine that isn't on the same network.
 - ROS 2 only, no ROS 1.
 - rosman wires up GPU/X11 *plumbing* but doesn't install GUI packages
   (rviz2, rqt, Gazebo) — add them via `extra_apt_packages`.

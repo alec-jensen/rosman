@@ -1,0 +1,63 @@
+site_name: rosman
+site_description: Run ROS 2 anywhere without installing it natively
+site_url: https://alec-jensen.github.io/rosman/
+repo_url: https://github.com/alec-jensen/rosman
+repo_name: alec-jensen/rosman
+edit_uri: edit/main/documentation/
+docs_dir: documentation
+site_dir: site
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Configuration: configuration.md
+  - Guides:
+      - Custom base images & setup scripts: guides/custom-images.md
+      - Team-shared images: guides/team-images.md
+      - Multi-host (LAN): guides/multi-host.md
+      - Shell tab-completion: guides/tab-completion.md
+      - GPU, GUIs & devices: guides/gpu-gui-devices.md
+  - Examples: examples.md
+  - Troubleshooting: troubleshooting.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/alec-jensen/rosman

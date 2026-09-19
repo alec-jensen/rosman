@@ -120,3 +120,49 @@ def test_run_checks_network_check_defaults_to_skipped(monkeypatch, tmp_path: Pat
     roundtrip = next(c for c in checks if c.name == "networking round-trip")
     assert roundtrip.ok
     assert "skipped" in roundtrip.detail
+
+
+def make_remote_peers_config(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    return parse_config(
+        'ros_distro: humble\ndomain_id: 5\nremote_peers: ["192.168.1.51"]\n', path
+    )
+
+
+def test_run_checks_reports_lan_ip_when_remote_peers_configured(monkeypatch, tmp_path: Path):
+    from rosman.lifecycle import ContainerManager
+
+    config = make_remote_peers_config(tmp_path)
+    monkeypatch.setattr(doctor_mod, "get_client", lambda: MagicMock())
+    monkeypatch.setattr(ContainerManager, "find_container", lambda self, config: None)
+    monkeypatch.setattr(doctor_mod, "detect_lan_ip", lambda: "192.168.1.50")
+
+    checks = doctor_mod.run_checks(config, network_check=False)
+    check = next(c for c in checks if c.name == "multi-host (LAN)")
+    assert check.ok
+    assert "192.168.1.50" in check.detail
+    assert "8669" in check.detail  # dds_port_range(5).stop - 1
+
+
+def test_run_checks_fails_lan_check_when_ip_undetectable(monkeypatch, tmp_path: Path):
+    from rosman.lifecycle import ContainerManager
+
+    config = make_remote_peers_config(tmp_path)
+    monkeypatch.setattr(doctor_mod, "get_client", lambda: MagicMock())
+    monkeypatch.setattr(ContainerManager, "find_container", lambda self, config: None)
+    monkeypatch.setattr(doctor_mod, "detect_lan_ip", lambda: None)
+
+    checks = doctor_mod.run_checks(config, network_check=False)
+    check = next(c for c in checks if c.name == "multi-host (LAN)")
+    assert not check.ok
+
+
+def test_run_checks_skips_lan_check_without_remote_peers(monkeypatch, tmp_path: Path):
+    from rosman.lifecycle import ContainerManager
+
+    config = make_config(tmp_path)
+    monkeypatch.setattr(doctor_mod, "get_client", lambda: MagicMock())
+    monkeypatch.setattr(ContainerManager, "find_container", lambda self, config: None)
+
+    checks = doctor_mod.run_checks(config, network_check=False)
+    assert not any(c.name == "multi-host (LAN)" for c in checks)

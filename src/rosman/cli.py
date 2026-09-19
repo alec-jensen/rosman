@@ -17,12 +17,15 @@ from rich.console import Console
 from rich.table import Table
 
 from rosman import __version__
+from rosman.completion import BASH_SCRIPT, ZSH_SCRIPT
+from rosman.completion import complete as complete_words
 from rosman.config import KNOWN_ROS_DISTROS, RosmanConfig, resolve_config
 from rosman.dispatch import RESERVED_COMMANDS, dispatch_passthrough, shell_command, translate_cwd
 from rosman.docker_client import get_client
 from rosman.doctor import run_checks
 from rosman.errors import RosmanError
 from rosman.lifecycle import ContainerManager, ImageResult
+from rosman.progress import RichReporter
 from rosman.state import RosmanState
 from rosman.update_check import check_for_update, pending_notice
 
@@ -109,7 +112,7 @@ def cmd_up(args: argparse.Namespace) -> int:
     console.print(
         f"Starting rosman container for this workspace ({config.ros_distro})..."
     )
-    container, created = manager.ensure_running(config)
+    container, created = manager.ensure_running(config, reporter=RichReporter(console))
     if created and manager.last_image_result is not None:
         _print_image_source(config, manager.last_image_result)
     verb = "Started" if not created else "Created and started"
@@ -212,7 +215,7 @@ def cmd_rebuild(args: argparse.Namespace) -> int:
             return 1
 
     console.print(f"Rebuilding container for this workspace ({config.ros_distro})...")
-    container = manager.rebuild(config)
+    container = manager.rebuild(config, reporter=RichReporter(console))
     console.print(f"[green]Rebuilt[/green] {container.name}")
     return 0
 
@@ -228,12 +231,29 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def _ensure_running_with_notice(manager: ContainerManager, config: RosmanConfig):
+    """Like ContainerManager.ensure_running, but prints the "starting" notice
+    *before* a slow first-time build/create, not after -- otherwise an
+    implicit auto-start on a passthrough/shell command looks like a hang.
+    """
+    container = manager.find_container(config)
+    if container is None:
+        console.print(
+            f"Starting rosman container for this workspace ({config.ros_distro})..."
+        )
+        return manager.create_container(config, reporter=RichReporter(console)), True
+    container.reload()
+    if container.status != "running":
+        container.start()
+    return container, False
+
+
 def cmd_shell(args: argparse.Namespace) -> int:
     config = _load_config_or_exit()
     client = get_client()
     state = RosmanState.load()
     manager = ContainerManager(client, state)
-    container, _ = manager.ensure_running(config)
+    container, _ = _ensure_running_with_notice(manager, config)
     workdir = translate_cwd(config)
     return shell_command(container.name, workdir, shell=args.shell)
 
@@ -245,8 +265,30 @@ def cmd_push(args: argparse.Namespace) -> int:
     client = get_client()
     state = RosmanState.load()
     manager = ContainerManager(client, state)
-    tag = manager.push_image(config)
+    tag = manager.push_image(config, reporter=RichReporter(console))
     console.print(f"[green]Pushed[/green] {tag}")
+    return 0
+
+
+def cmd_completion(args: argparse.Namespace) -> int:
+    script = BASH_SCRIPT if args.shell == "bash" else ZSH_SCRIPT
+    print(script, end="")
+    return 0
+
+
+def cmd_complete(args: argparse.Namespace) -> int:
+    """Backs the installed shell completion function (`rosman completion
+    bash`/`zsh`) -- never a human-facing command. Must never raise, print
+    anything but candidates, or start a container: Tab is not `rosman up`.
+    """
+    try:
+        config = resolve_config()
+        client = get_client()
+        state = RosmanState.load()
+        for candidate in complete_words(client, state, config, args.words):
+            print(candidate)
+    except Exception:
+        pass
     return 0
 
 
@@ -255,11 +297,7 @@ def cmd_passthrough(args: list[str]) -> int:
     client = get_client()
     state = RosmanState.load()
     manager = ContainerManager(client, state)
-    container, created = manager.ensure_running(config)
-    if created:
-        console.print(
-            f"Starting rosman container for this workspace ({config.ros_distro})..."
-        )
+    container, _ = _ensure_running_with_notice(manager, config)
     workdir = translate_cwd(config)
     return dispatch_passthrough(args, container.name, workdir)
 
@@ -319,6 +357,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_push.set_defaults(func=cmd_push)
 
+    p_completion = subparsers.add_parser(
+        "completion", help="Print a shell tab-completion script to eval in your rc file"
+    )
+    p_completion.add_argument("shell", choices=["bash", "zsh"])
+    p_completion.set_defaults(func=cmd_completion)
+
+    p_complete = subparsers.add_parser(
+        "__complete", help=argparse.SUPPRESS  # internal -- backs the completion script
+    )
+    p_complete.add_argument("words", nargs="*")
+    p_complete.set_defaults(func=cmd_complete)
+
     def _print_help(_args: argparse.Namespace) -> int:
         parser.print_help()
         return 0
@@ -351,7 +401,11 @@ def _maybe_show_update_notice() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    _maybe_show_update_notice()
+    # Tab completion fires on every keystroke -- an update notice (or its
+    # throttled background network check) popping up mid-typing would be
+    # bizarre, so `__complete` is the one reserved command that skips it.
+    if not (argv and argv[0] == "__complete"):
+        _maybe_show_update_notice()
 
     if argv and argv[0] not in RESERVED_COMMANDS and not argv[0].startswith("-"):
         try:
