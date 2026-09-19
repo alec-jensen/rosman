@@ -58,12 +58,22 @@ def parse_simulate_output(text: str) -> list[str]:
     return sorted(set(packages))
 
 
-def resolve_packages(container, extra_args: list[str]) -> list[str]:
+def resolve_packages(container, extra_args: list[str]) -> tuple[int, list[str], str]:
     """Dry-run rosdep to get the resolved apt package list without
-    installing anything yet."""
+    installing anything yet.
+
+    Returns `(exit_code, packages, output)` rather than just the package
+    list -- confirmed against a real container that an unresolvable
+    rosdep key (a typo, or a package not in the rosdistro index) makes
+    `--simulate` exit 1 with a clear error and *no* "apt-get install"
+    lines. Silently treating that the same as "nothing to install" would
+    misreport a real failure as full success -- the caller must check
+    `exit_code` before trusting an empty `packages` list.
+    """
     command = _rosdep_command(extra_args, simulate=True)
-    _exit_code, output = container.exec_run(["bash", "-lc", command])
-    return parse_simulate_output(output.decode(errors="replace"))
+    exit_code, output = container.exec_run(["bash", "-lc", command])
+    text = output.decode(errors="replace")
+    return exit_code, parse_simulate_output(text), text
 
 
 def install_packages(container, extra_args: list[str]) -> tuple[int, str]:

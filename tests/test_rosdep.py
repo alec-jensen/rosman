@@ -46,14 +46,35 @@ def test_resolve_packages_runs_simulate_and_parses(monkeypatch):
         b"sudo -H apt-get install -y ros-humble-example-interfaces\n",
     )
 
-    result = resolve_packages(container, [])
+    exit_code, packages, _output = resolve_packages(container, [])
 
-    assert result == ["ros-humble-example-interfaces"]
+    assert exit_code == 0
+    assert packages == ["ros-humble-example-interfaces"]
     argv = container.exec_run.call_args[0][0]
     command = argv[-1]
     assert "--simulate" in command
     assert "--from-paths /workspace/src" in command
     assert "--ignore-src" in command
+
+
+def test_resolve_packages_surfaces_nonzero_exit_code(monkeypatch):
+    # Regression test: an unresolvable rosdep key makes `--simulate` exit 1
+    # with an ERROR message and no "apt-get install" lines -- confirmed
+    # against a real container. Silently treating that the same as "zero
+    # packages needed" would misreport a real failure as full success.
+    container = MagicMock()
+    container.exec_run.return_value = (
+        1,
+        b"ERROR: the following packages/stacks could not have their rosdep "
+        b"keys resolved to system dependencies:\nbadpkg: Cannot locate rosdep "
+        b"definition for [nonexistent_key]\n",
+    )
+
+    exit_code, packages, output = resolve_packages(container, [])
+
+    assert exit_code == 1
+    assert packages == []
+    assert "Cannot locate rosdep definition" in output
 
 
 def test_install_packages_runs_apt_update_first():
@@ -79,3 +100,13 @@ def test_resolve_packages_passes_through_extra_args(monkeypatch):
     argv = container.exec_run.call_args[0][0]
     command = argv[-1]
     assert "--rosdistro humble" in command
+
+
+def test_resolve_packages_returns_empty_when_genuinely_satisfied():
+    container = MagicMock()
+    container.exec_run.return_value = (0, b"#[apt] All required rosdeps installed\n")
+
+    exit_code, packages, _output = resolve_packages(container, [])
+
+    assert exit_code == 0
+    assert packages == []

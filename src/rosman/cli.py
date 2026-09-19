@@ -312,7 +312,12 @@ def cmd_rosdep_install(extra_args: list[str]) -> int:
     container, _ = _ensure_running_with_notice(manager, config)
 
     console.print("Resolving dependencies declared under src/ via rosdep...")
-    packages = resolve_packages(container, extra_args)
+    resolve_exit_code, packages, resolve_output = resolve_packages(container, extra_args)
+    if resolve_exit_code != 0:
+        err_console.print(
+            f"[red]rosdep could not resolve dependencies:[/red]\n{resolve_output}"
+        )
+        return resolve_exit_code
     if not packages:
         console.print("Nothing to install -- all declared dependencies are already satisfied.")
         return 0

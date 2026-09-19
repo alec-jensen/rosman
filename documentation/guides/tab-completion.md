@@ -23,9 +23,9 @@ package — their own entry points call it unconditionally at startup. rosman
 doesn't reimplement any of that completion logic; it relays the same
 protocol through the `docker exec` boundary: the installed shell function
 runs a hidden `rosman __complete` that reconstructs the equivalent `ros2
-...`/`colcon ...` command line, runs it inside your workspace's container
-with the environment variables `argcomplete` expects, and forwards the
-candidates back.
+...`/`colcon ...`/`rosdep ...` command line, runs it inside your
+workspace's container with the environment variables `argcomplete`
+expects, and forwards the candidates back.
 
 ## Limitations
 
@@ -34,5 +34,13 @@ candidates back.
   Tab never starts a container by itself.
 - Completion is end-of-line only — no mid-line editing awareness.
 - The very first word after `rosman` merges rosman's own reserved commands
-  (`doctor`, `shell`, ...) with whatever `ros2` itself suggests, since
-  rosman can't tell which one you're typing from a short prefix alone.
+  (`doctor`, `shell`, ...) with `colcon`/`rosdep` and whatever `ros2`
+  itself suggests, since rosman can't tell which one you're typing from a
+  short prefix alone.
+- `rosdep` itself isn't `argcomplete`-instrumented (unlike `ros2`/
+  `colcon`) — confirmed directly against a real container: it doesn't
+  respond to the completion protocol at all. So `rosman rosdep` completes
+  as a first word, but its own subcommands/flags (`update`, `install`,
+  `--from-paths`, ...) don't tab-complete beyond that. Nothing rosman can
+  fix short of writing its own `rosdep` completer, which would mean
+  reimplementing part of a tool rosman otherwise just forwards to.

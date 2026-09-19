@@ -59,6 +59,14 @@ RESERVED_COMMAND_NAMES = (
     "init up down status rebuild doctor shell push completion help"
 )
 
+# Not "reserved" in the sense above -- these *do* get containerized, just
+# with their own first-word rule (verbatim, not ros2-prefixed) instead of
+# being reserved-word-excluded. Still need to be in the static first-word
+# candidate list alongside the reserved ones though: a container round
+# trip for a single typed letter wouldn't ever suggest "colcon"/"rosdep"
+# themselves, since neither is a real `ros2` subcommand.
+PASSTHROUGH_TOOL_NAMES = ("colcon", "rosdep")
+
 BASH_SCRIPT = r"""# rosman shell completion -- add to ~/.bashrc:
 #   eval "$(rosman completion bash)"
 _rosman_complete() {
@@ -68,7 +76,7 @@ _rosman_complete() {
         local dynamic
         dynamic=$(rosman __complete "$cur" 2>/dev/null)
         local reserved
-        IFS=$' \t\n' reserved=$(compgen -W "__RESERVED__" -- "$cur")
+        IFS=$' \t\n' reserved=$(compgen -W "__RESERVED__ __TOOLS__" -- "$cur")
         COMPREPLY=()
         IFS=$'\n'
         [[ -n "$reserved" ]] && COMPREPLY+=( $reserved )
@@ -93,7 +101,9 @@ _rosman_complete() {
     [[ -n "$out" ]] && COMPREPLY=( $out )
 }
 complete -F _rosman_complete rosman
-""".replace("__RESERVED__", RESERVED_COMMAND_NAMES)
+""".replace("__RESERVED__", RESERVED_COMMAND_NAMES).replace(
+    "__TOOLS__", " ".join(PASSTHROUGH_TOOL_NAMES)
+)
 
 ZSH_SCRIPT = (
     """# rosman shell completion -- add to ~/.zshrc:
@@ -106,12 +116,13 @@ autoload -Uz bashcompinit && bashcompinit
 
 def build_inner_command(words: list[str]) -> list[str] | None:
     """Mirrors `dispatch.dispatch_passthrough`'s own rule for turning
-    passthrough words into a `ros2`/`colcon` command line. Returns None for
-    an empty/reserved first word, which the shell function's static
-    candidate list already covers -- no container round trip needed."""
+    passthrough words into a `ros2`/`colcon`/`rosdep` command line. Returns
+    None for an empty/reserved first word, which the shell function's
+    static candidate list already covers -- no container round trip
+    needed."""
     if not words or words[0] in RESERVED_COMMAND_NAMES.split():
         return None
-    if words[0] == "colcon":
+    if words[0] in PASSTHROUGH_TOOL_NAMES:
         return list(words)
     return ["ros2", *words]
 

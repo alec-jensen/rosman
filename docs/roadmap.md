@@ -671,3 +671,64 @@ summary:
   importing both packages again in the freshly rebuilt container). Also
   verified the `rosman.yml`/`rosman.lock` distro-mismatch config error
   fires correctly.
+
+## rosdep completion + error-handling fixes (2026-09-19, v0.2.1)
+
+Real user reports from actually using v0.2.0: "the problem with rosdep tab
+complete is it doesnt show as one of the tab completion options." Two real
+bugs, both in `completion.py`, both from forgetting to mirror a fix I'd
+already made in `dispatch.py`:
+
+- `build_inner_command` still fell through to the `ros2`-prefix branch for
+  `rosdep` (`["ros2", "rosdep", ...]`, not a real ros2 subcommand) instead
+  of forwarding it directly like `colcon` -- `dispatch.py`'s
+  `dispatch_passthrough` got this fix when rosdep passthrough was added,
+  `completion.py`'s own copy of the same rule didn't.
+- Neither `colcon` nor `rosdep` was ever offered as a first-word
+  completion candidate at all (the static list only had rosman's actual
+  reserved commands; the dynamic path only asks `ros2 <prefix>`, and
+  neither is a real `ros2` subcommand) -- `rosman <TAB>` could never
+  suggest either, not just rosdep.
+
+Fixed with a new `PASSTHROUGH_TOOL_NAMES = ("colcon", "rosdep")` constant,
+used both in `build_inner_command` and merged into the static first-word
+candidate list. Also confirmed and documented a real, permanent
+limitation while investigating: `rosdep` itself isn't
+`argcomplete`-instrumented (checked directly against a real container --
+it doesn't respond to the `_ARGCOMPLETE=1` protocol at all, exit code 2,
+no fd-8 output), unlike `ros2`/`colcon`. So `rosdep` completes as a first
+word now, but its own subcommands/flags never will -- not fixable without
+reimplementing part of rosdep itself, which isn't in scope.
+
+Also investigated a separate report ("rosdep install didnt find anything
+until after a rebuild, so i had to rebuild, rosdep install, rebuild").
+Tried to reproduce directly against a real container multiple times;
+never got a genuine false negative out of rosdep's own dpkg-backed
+"is this satisfied" check -- it was reliably correct every time, including
+correctly reporting "satisfied" for a package I'd manually installed into
+that same container earlier in testing. Most likely explanation: some
+earlier action left the package genuinely present in that specific
+container (not necessarily the one-off fix I'd suggested earlier -- Alec
+wasn't sure either), and the subsequent `rosman rebuild` gave a
+genuinely fresh container without it, which is exactly what surfaced the
+real need. Documented this interaction in troubleshooting.md rather than
+claim a fix for something I couldn't reproduce.
+
+Did fix a real, adjacent bug found *while* trying to reproduce the above:
+`resolve_packages` never checked the `--simulate` step's own exit code.
+Confirmed against a real container that an unresolvable rosdep key makes
+`--simulate` exit 1 with a clear `ERROR:` message and (correctly) no
+"apt-get install" lines -- which `cmd_rosdep_install` was silently
+treating identically to "nothing needed," misreporting a real failure as
+full success. Fixed by threading the exit code through and surfacing the
+actual rosdep error when it's non-zero.
+
+Also diagnosed (not a rosman bug, but worth documenting): a separate
+`AttributeError: __enter__` deep in a user's cloned `demo_nodes_py` was
+traced to cloning the repo's default branch (`rolling`) instead of the
+distro-matching `humble` branch -- confirmed directly by diffing
+`talker.py` between both branches on the real `ros2/demos` repo (`with
+rclpy.init(args=args):`, a newer API, on `rolling`; plain
+`rclpy.init(args=args)` on `humble`). Added to troubleshooting.md as a
+general "you probably cloned the wrong branch" pattern, since it's a
+common, non-rosman-specific ROS 2 gotcha.

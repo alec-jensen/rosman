@@ -22,6 +22,23 @@ def test_build_inner_command_leaves_colcon_alone():
     assert build_inner_command(["colcon", "bui"]) == ["colcon", "bui"]
 
 
+def test_build_inner_command_leaves_rosdep_alone():
+    # Regression test: this used to fall through to the ros2-prefix branch
+    # (`["ros2", "rosdep", "update"]`), which isn't a real ros2 subcommand,
+    # so `rosman rosdep <TAB>` silently found nothing -- reported by a real
+    # user right after rosdep support shipped.
+    assert build_inner_command(["rosdep", "update"]) == ["rosdep", "update"]
+
+
+def test_bash_script_offers_colcon_and_rosdep_as_first_word_candidates():
+    # Regression test: neither was ever offered as a first-word completion
+    # candidate (dynamic completion only asks `ros2 <prefix>`, and neither
+    # is a real ros2 subcommand) -- same real user report.
+    assert "colcon" in BASH_SCRIPT
+    assert "rosdep" in BASH_SCRIPT
+    assert 'compgen -W "' in BASH_SCRIPT
+
+
 def test_build_inner_command_none_for_empty_words():
     assert build_inner_command([]) is None
 
