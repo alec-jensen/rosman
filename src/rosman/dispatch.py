@@ -77,10 +77,18 @@ def _exec_argv(container: str, workdir: str, command: list[str]) -> list[str]:
 def exec_in_container(container_name: str, workdir: str, command: list[str]) -> int:
     """Replace the current process with `docker exec` into the container,
     running `command` at `workdir`. Never returns on POSIX (os.execvp
-    replaces the process image); returns the exit code on platforms where
-    exec isn't available."""
+    replaces the process image); returns the exit code on Windows, where
+    `os.execvp` exists but isn't a real process replacement.
+
+    Windows *has* `os.execvp` (so `hasattr(os, "execvp")` is true there too),
+    but it's emulated via spawn-then-exit rather than true exec, and its
+    argv-to-command-line quoting is unreliable -- e.g. it mangles a docker.exe
+    path containing a space ("C:\\Program Files\\Docker\\...") badly enough
+    that the child sees a corrupted argv and `docker exec` fails with
+    "unknown shorthand flag". `subprocess.call` quotes correctly there via
+    `subprocess.list2cmdline`, so Windows always goes through that branch."""
     argv = _exec_argv(container_name, workdir, command)
-    if hasattr(os, "execvp"):
+    if os.name == "posix":
         os.execvp(argv[0], argv)  # noqa: S606 - intentional, see module docstring
     import subprocess
 

@@ -90,6 +90,18 @@ def test_setup_script_rejects_parent_traversal(tmp_path: Path):
         parse_config("ros_distro: humble\nsetup_script: ../../etc/passwd\n", path)
 
 
+def test_setup_script_rejects_windows_absolute_path(tmp_path: Path):
+    # rosman.yml is a portable config file that may be checked into a repo
+    # shared across Linux and Windows machines, so a Windows-style absolute
+    # path must be rejected even when rosman itself is running on Linux
+    # (where `Path` alone wouldn't recognize it as absolute).
+    path = tmp_path / "rosman.yml"
+    with pytest.raises(ConfigError, match="setup_script"):
+        parse_config(
+            "ros_distro: humble\nsetup_script: 'C:\\Windows\\System32\\evil.sh'\n", path
+        )
+
+
 def test_registry_image_defaults_to_none(tmp_path: Path):
     path = tmp_path / "rosman.yml"
     config = parse_config(MINIMAL, path)

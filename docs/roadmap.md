@@ -2,6 +2,55 @@
 
 Tracking status against the phased build order in [`spec.md`](spec.md) §10.
 
+## Windows live verification (2026-09-19)
+
+Ran `rosman` for real on a Windows 11 machine, both from native Windows
+Python (PowerShell/Docker Desktop directly, no WSL2) and confirmed WSL2 is
+available on the same box (Ubuntu 24.04) for the fully-featured path.
+Answers a real design question: **rosman does not require WSL2** — native
+Windows execution against Docker Desktop's named pipe works end-to-end
+(`init`, `up`, `doctor`, `status`, `ros2`/`colcon` passthrough including
+writing files back to the Windows-side bind mount, `colcon build`, `shell`
+with piped non-interactive stdin, `down --remove`). WSL2 remains relevant
+only for GUI passthrough (WSLg) and `usbipd-win` USB device attachment,
+which are meaningless without it, but the core workflow doesn't need it.
+
+Two real bugs found and fixed, both invisible to the existing unit tests
+because they only manifest under real Windows path/process semantics:
+
+1. **`setup_script` path validation used the host `Path` class**
+   (`rosman/config.py::_validate_setup_script`), so a POSIX-style absolute
+   path like `/etc/passwd` in `rosman.yml` silently passed validation when
+   parsed on Windows (`WindowsPath("/etc/passwd").is_absolute()` is `False`
+   — no drive letter — even though the path has a root). Since `rosman.yml`
+   is a portable config file that may be committed to a repo shared across a
+   team's Linux and Windows machines, this was a real path-traversal gap on
+   Windows specifically. Fixed by checking both `PurePosixPath` and
+   `PureWindowsPath` absoluteness/traversal regardless of host OS.
+2. **`ros2`/`colcon` passthrough and `rosman shell` silently produced
+   garbled `docker exec` invocations on Windows** (`rosman/dispatch.py`).
+   The code picked between `os.execvp` (true process replacement) and a
+   `subprocess.call` fallback using `hasattr(os, "execvp")`, wrongly
+   assuming that attribute implies POSIX. Windows has `os.execvp` too, but
+   it's an emulated spawn-then-exit with unreliable argv-to-command-line
+   quoting — it corrupted `docker exec -i ...` badly enough (mangling the
+   `docker.exe` path under `C:\Program Files\...`, which contains a space)
+   that Docker's CLI parser errored on `-i` as an unrecognized top-level
+   flag instead of an `exec` subcommand flag. Fixed by keying the branch on
+   `os.name == "posix"` instead, so Windows always uses the working
+   `subprocess.call` path (which quotes correctly via
+   `subprocess.list2cmdline`).
+
+Also confirmed working as designed: `usbipd` guidance degrades cleanly to
+generic install instructions when `usbipd.exe` isn't on `PATH`; Rich's
+table/box-drawing output (which looked garbled through this session's
+non-UTF-8 shell) renders correctly in a real PowerShell/Windows Terminal
+session — not a rosman bug, just a UTF-8 console requirement.
+
+Not yet live-verified: WSL2 GUI passthrough against a real X/WSLg session,
+`usbipd` device attach against real hardware, and `rosman doctor
+--network-check` from native Windows (only exercised from Linux so far).
+
 ## Live verification (2026-09-19)
 
 Docker access on the dev machine was fixed and the core lifecycle got its
@@ -58,9 +107,12 @@ different, arbitrary UID (not 1000) — `sudo`, `$HOME`, file writes to
 `build`/`install`/`log`, and `ros2`/`colcon` on `$PATH` all correct.
 
 Still not verified live: Linux X11 GUI passthrough (no real X server
-exercised through Docker here) and all of the Windows WSL2/WSLg/usbipd
-path (this isn't a Windows machine — though a Windows-side session is
-now working on this separately).
+exercised through Docker here) — though a real X server/`xauth` is
+actually available on this dev machine, unlike the earlier assumption
+here, so this is worth revisiting. The core Windows path has since been
+live-verified from a real Windows machine (native, no WSL2 required) — see
+"Windows live verification" above — though WSLg GUI passthrough and
+`usbipd` device attach against real hardware remain unverified.
 
 ## Phase 1 — single container, no networking — done
 - Config resolver (`rosman/config.py`): finds/validates `rosman.yml`,
