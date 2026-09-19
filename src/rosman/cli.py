@@ -161,10 +161,17 @@ def cmd_rebuild(args: argparse.Namespace) -> int:
     manager = ContainerManager(client, state)
 
     if not args.yes:
-        answer = input(
-            f"This will destroy and recreate the container for {config.project_name} "
-            "(build/install/log volumes are preserved). Continue? [y/N] "
-        )
+        try:
+            answer = input(
+                f"This will destroy and recreate the container for {config.project_name} "
+                "(build/install/log volumes are preserved). Continue? [y/N] "
+            )
+        except EOFError:
+            err_console.print(
+                "[red]No input available to confirm.[/red] Pass --yes/-y to rebuild "
+                "non-interactively."
+            )
+            return 1
         if answer.strip().lower() not in ("y", "yes"):
             console.print("Aborted.")
             return 1
