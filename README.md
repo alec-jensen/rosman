@@ -11,23 +11,27 @@ Rust) declares which ROS 2 distro a project needs. `rosman` reads it, ensures
 a container running that distro exists for the current workspace, and execs
 every command into it.
 
-**Target platforms: Linux (Docker Engine) and Windows (Docker Desktop,
-WSL2 backend). macOS is out of scope.**
+**Target platforms: Linux (Docker Engine) and Windows (Docker Desktop).
+The core workflow runs natively on Windows without WSL2; WSL2 is only
+needed for GUI passthrough (WSLg) and USB device attachment (usbipd-win).
+macOS is out of scope.**
 
 ## Status
 
 Package is currently unreleased (`0.0.0`) — `0.0.1` gets tagged once
-there's a confirmed stable working base. That said, most of the design has
-been verified end to end against a real Docker daemon, not just
-unit-tested: `rosman up`, `ros2`/`colcon` passthrough, `colcon build`,
-UID-matched file permissions (including across a shared team image built
-by a different UID than the one running it), the
-`rosman doctor --network-check` talker/listener round trip, `gpu: true`,
-`base_image`/`setup_script` (including on a real `nvidia/cuda` build), and
-the `registry_image` team-sharing workflow (build → push → a "fresh
-machine" pulls instead of rebuilding). Still unverified: Linux GUI (X11)
-passthrough against a real display, and the Windows/WSL2/WSLg/usbipd path
-end to end. See [`docs/roadmap.md`](docs/roadmap.md) for exact status.
+there's a confirmed stable working base. That said, nearly the entire
+design has been verified end to end against real Docker daemons (Linux
+and Windows), not just unit-tested: `rosman up`, `ros2`/`colcon`
+passthrough, `colcon build`, UID-matched file permissions (including
+across a shared team image built by a different UID than the one running
+it), the `rosman doctor --network-check` talker/listener round trip,
+`gpu: true`, `base_image`/`setup_script` (including on a real
+`nvidia/cuda` build), the `registry_image` team-sharing workflow (build →
+push → a "fresh machine" pulls instead of rebuilding), Linux X11 GUI
+passthrough (a real window rendered on the host desktop), and the core
+Windows workflow running natively without WSL2. Still unverified: WSLg GUI
+passthrough and `usbipd` device attach against real Windows hardware. See
+[`docs/roadmap.md`](docs/roadmap.md) for exact status.
 
 ## Install (development)
 

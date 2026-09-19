@@ -106,13 +106,23 @@ and directly confirmed the pulled image works correctly under a genuinely
 different, arbitrary UID (not 1000) — `sudo`, `$HOME`, file writes to
 `build`/`install`/`log`, and `ros2`/`colcon` on `$PATH` all correct.
 
-Still not verified live: Linux X11 GUI passthrough (no real X server
-exercised through Docker here) — though a real X server/`xauth` is
-actually available on this dev machine, unlike the earlier assumption
-here, so this is worth revisiting. The core Windows path has since been
-live-verified from a real Windows machine (native, no WSL2 required) — see
-"Windows live verification" above — though WSLg GUI passthrough and
-`usbipd` device attach against real hardware remain unverified.
+**Fourth round (same day): Linux X11 GUI passthrough.** This dev machine
+turned out to actually have a real X server (`DISPLAY=:0`, a live GNOME
+session) and `xauth` installed, contradicting the earlier assumption here
+that GUI passthrough couldn't be tested without real hardware.
+**Live-verified 2026-09-19**: built a workspace with `x11-apps` via
+`extra_apt_packages`, confirmed `rosman up` correctly wired up
+`DISPLAY`/`XAUTHORITY` and mounted both `/tmp/.X11-unix` and the generated
+XAuth cookie, ran `xeyes` inside the container, and confirmed via
+`xlsclients`/`xwininfo` on the host that it registered as a genuine
+connected X client and produced a real, window-manager-decorated window on
+the actual desktop — not just "the process started without erroring."
+
+The Windows path has separately been live-verified from a real Windows
+machine (native, no WSL2 required) — see "Windows live verification"
+above. Combined with this round, the only pieces of the design still
+without any live verification at all are WSLg GUI passthrough and
+`usbipd` device attach against real Windows hardware.
 
 ## Phase 1 — single container, no networking — done
 - Config resolver (`rosman/config.py`): finds/validates `rosman.yml`,
@@ -159,25 +169,25 @@ live-verified from a real Windows machine (native, no WSL2 required) — see
   pull/build an image. **Live-verified 2026-09-19**: the talker/listener
   round trip passed against a real Docker daemon on the first attempt.
 
-## Phase 4 — platform-specific extensions — done (needs live verification)
+## Phase 4 — platform-specific extensions — done, mostly live-verified
 - Linux: X11/XAuth mounting for GUI tools (rviz2/rqt/Gazebo)
   (`rosman/platform_support.py::gui_passthrough`), generating a
   rocker-style masked XAuth cookie rather than sharing the whole host
   `~/.Xauthority`, wired into `ContainerManager.create_container`.
   Degrades gracefully (skips the cookie, keeps `$DISPLAY`) if `xauth` isn't
-  installed on the host, rather than failing `rosman up`.
+  installed on the host, rather than failing `rosman up`. **Live-verified
+  2026-09-19** (see "Live verification" above): a real `xeyes` window from
+  inside a rosman container, rendered on the actual host desktop.
 - Windows: WSL2/WSLg detection (`rosman/platform_support.py::is_wsl2`) so
   rosman skips the Linux X11/XAuth logic and just bind-mounts WSLg's
   existing `/tmp/.X11-unix` and `/mnt/wslg` sockets through untouched.
   `usbipd-win` guidance in `rosman doctor`: shells out to `usbipd list` (or
   `usbipd.exe list` from WSL2) when available and prints the BUSID listing
   alongside the bind/attach commands; falls back to generic install
-  instructions if `usbipd` isn't found on PATH.
-- Not yet verified on an actual Windows/WSL2 host or against a real X
-  server — the pure-Python logic (WSL2 detection, XAuth cookie generation
-  falling back cleanly when `xauth` is missing, env/volume construction) is
-  unit-tested, but nobody has yet run `rosman up` with `gpu: true` or a
-  populated `devices:` list against real hardware.
+  instructions if `usbipd` isn't found on PATH. The core Windows workflow
+  (not GUI/device-specific) is live-verified — see "Windows live
+  verification" above — but WSLg GUI passthrough and `usbipd` device
+  attach specifically are not yet tested against real Windows hardware.
 - One documented limitation: rosman only wires up the X11/GPU *plumbing*.
   It does not install GUI packages (rviz2, rqt, Gazebo) into the per-
   workspace image — that's what `extra_apt_packages` in `rosman.yml` is
