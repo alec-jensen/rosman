@@ -81,8 +81,14 @@ jobs:
           echo "${{ secrets.RELEASE_GPG_PRIVATE_KEY }}" | gpg --homedir /tmp/gnupg --batch --import
 
       - name: Sign the .rpm package
+        # -e VERSION: $VERSION is referenced *inside* the single-quoted
+        # bash -c script below, so the outer (runner) shell never expands
+        # it -- it must exist in the container's own environment instead.
+        # (GPG_KEY_ID takes the opposite approach: it's deliberately broken
+        # out of the single quotes so the *outer* shell expands it, since
+        # it's also needed unquoted inside a heredoc line.)
         run: |
-          docker run --rm -v "$PWD/dist:/dist" -v /tmp/gnupg:/gpghome fedora:latest bash -c '
+          docker run --rm -e VERSION -v "$PWD/dist:/dist" -v /tmp/gnupg:/gpghome fedora:latest bash -c '
             set -e
             dnf install -y -q rpm-sign > /dev/null
             cat > /root/.rpmmacros << MACROS
@@ -96,7 +102,7 @@ jobs:
 
       - name: Sign the pacman package
         run: |
-          docker run --rm -v "$PWD/dist:/dist" -v /tmp/gnupg:/gpghome archlinux:latest bash -c '
+          docker run --rm -e VERSION -v "$PWD/dist:/dist" -v /tmp/gnupg:/gpghome archlinux:latest bash -c '
             set -e
             gpg --homedir /gpghome --batch --pinentry-mode loopback \
               --passphrase "${{ secrets.RELEASE_GPG_PASSPHRASE }}" \
@@ -190,7 +196,7 @@ jobs:
           mkdir -p public/pacman
           cp incoming/rosman-${VERSION}-1-x86_64.pkg.tar.zst public/pacman/
           cp incoming/rosman-${VERSION}-1-x86_64.pkg.tar.zst.sig public/pacman/
-          docker run --rm -v "$PWD/public/pacman:/repo" -v /tmp/gnupg:/gpghome archlinux:latest bash -c '
+          docker run --rm -e VERSION -v "$PWD/public/pacman:/repo" -v /tmp/gnupg:/gpghome archlinux:latest bash -c '
             set -e
             pacman -Sy --noconfirm --needed pacman-contrib > /dev/null 2>&1
             cd /repo
