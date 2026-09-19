@@ -76,6 +76,16 @@ Windows package manager support (winget/Chocolatey) isn't set up yet. Not
 on apt/dnf/pacman, or on Windows? Install from source, below, or grab the
 raw binary/wheel from a [GitHub release](https://github.com/alec-jensen/rosman/releases).
 
+### Update notifications
+
+rosman checks GitHub Releases for a newer version at most once every 24
+hours (never on every command, and it never blocks or fails visibly --
+any network problem is silently ignored). If a newer version is out,
+you'll see a one-line notice before a command's own output, at most once
+a day, only in an interactive terminal (never in scripts/CI). It only
+tells you; it doesn't update anything itself -- run your package
+manager's upgrade command as usual.
+
 ## Install (development)
 
 ```sh

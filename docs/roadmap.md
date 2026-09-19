@@ -299,6 +299,47 @@ existing `.gitignore`. Validated through the same per-field validators as
 the main config (applied to the merged dict), so a bad override value
 fails the same way a bad main-config value would.
 
+## Phase 9 — automated releases + update notifications — done, live-verified
+Two related pieces, both explicitly requested:
+
+- **Release pipeline** (`.github/workflows/release.yml`, `packaging/`):
+  a `v*` git tag triggers a build (self-contained PyInstaller binary,
+  built inside `ubuntu:22.04` for glibc compatibility), packaging into
+  `.deb`/`.rpm`/pacman via `nfpm`, GPG signing, and publishing real signed
+  apt/dnf/pacman repositories to GitHub Pages
+  (`https://alec-jensen.github.io/rosman/`) plus a GitHub Release. Full
+  design reasoning (why not "bring your own image"-style shortcuts, the
+  chosen channels, the manual-tag-triggers-everything-else model) is in
+  `spec.md`'s addenda.
+- **Update notifications** (`rosman/update_check.py`): checks GitHub
+  Releases' latest tag at most once every 24h (cached in the same local
+  state file as everything else), and shows a one-line notice at most
+  once every 24h when the cached latest version differs from what's
+  running -- printed *before* dispatch (not after), since passthrough/
+  shell commands replace the process via `os.execvp` on POSIX and never
+  return to Python for an "after" notice to run. Any network failure is
+  swallowed silently; the check must never make a command feel slow or
+  broken. Gated on `stderr` being a real terminal, so scripted/CI usage
+  never sees it.
+
+Both **live-verified 2026-09-19** against real infrastructure, not just
+locally: pushed four real test tags through the actual release workflow
+(cleaned up afterward), catching three real bugs invisible to a single
+local pass -- `$VERSION` not reaching signing containers (a quoting bug),
+`repo-add --sign` failing *silently* against a passphrase-protected key,
+and `gpg` refusing to overwrite fixed-name signature files on a *second*
+release specifically (a bug class only a real re-release can surface).
+Final confirmation: real `apt install`/`dnf install`/`pacman -S` against
+the live signed repos, with full signature verification enabled, correctly
+installing and self-reporting the tagged version. The update checker was
+verified against the live (currently-empty, since all test releases were
+cleaned up) GitHub Releases API, confirming graceful no-op behavior when no
+release exists yet, plus a full notice-rendering pass with a mocked cached
+state.
+
+Not done: Windows package manager support and PyPI publishing (out of
+scope for this pass, per explicit direction).
+
 ## Versioning
 Package is currently unreleased (`0.0.0` in both `pyproject.toml` and
 `rosman.__version__`). `0.0.1` gets tagged once Alec confirms there's a

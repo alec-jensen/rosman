@@ -51,9 +51,36 @@ class ProjectState:
 
 
 @dataclass
+class UpdateCheckState:
+    """Cached state for the background update check (see update_check.py).
+    Not per-project -- one rosman install has one "latest known version"
+    regardless of how many workspaces it's used for."""
+
+    last_checked: str | None = None
+    last_notified: str | None = None
+    latest_version: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "last_checked": self.last_checked,
+            "last_notified": self.last_notified,
+            "latest_version": self.latest_version,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> UpdateCheckState:
+        return cls(
+            last_checked=data.get("last_checked"),
+            last_notified=data.get("last_notified"),
+            latest_version=data.get("latest_version"),
+        )
+
+
+@dataclass
 class RosmanState:
     path: Path = field(default_factory=default_state_path)
     projects: dict[str, ProjectState] = field(default_factory=dict)
+    update_check: UpdateCheckState = field(default_factory=UpdateCheckState)
 
     @classmethod
     def load(cls, path: Path | None = None) -> RosmanState:
@@ -68,11 +95,15 @@ class RosmanState:
         projects = {
             key: ProjectState.from_dict(value) for key, value in raw.get("projects", {}).items()
         }
-        return cls(path=path, projects=projects)
+        update_check = UpdateCheckState.from_dict(raw.get("update_check", {}))
+        return cls(path=path, projects=projects, update_check=update_check)
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"projects": {key: p.to_dict() for key, p in self.projects.items()}}
+        payload = {
+            "projects": {key: p.to_dict() for key, p in self.projects.items()},
+            "update_check": self.update_check.to_dict(),
+        }
         tmp = self.path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
         tmp.replace(self.path)

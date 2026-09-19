@@ -24,6 +24,7 @@ from rosman.doctor import run_checks
 from rosman.errors import RosmanError
 from rosman.lifecycle import ContainerManager, ImageResult
 from rosman.state import RosmanState
+from rosman.update_check import check_for_update, pending_notice
 
 console = Console()
 err_console = Console(stderr=True)
@@ -328,8 +329,29 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _maybe_show_update_notice() -> None:
+    """Best-effort only: must never affect the command actually running,
+    on failure or otherwise. Printed *before* dispatch, not after -- most
+    reserved commands (shell, passthrough) replace this process outright
+    via os.execvp on POSIX and never return to Python, so "after" simply
+    wouldn't run for them at all. Gated on stderr being a real terminal so
+    scripted/CI usage never sees it, and throttled independently of the
+    (also throttled) network check itself -- see update_check.py."""
+    try:
+        if not sys.stderr.isatty():
+            return
+        state = RosmanState.load()
+        check_for_update(state)
+        notice = pending_notice(state, __version__)
+        if notice:
+            err_console.print(f"[yellow]{notice}[/yellow]")
+    except Exception:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    _maybe_show_update_notice()
 
     if argv and argv[0] not in RESERVED_COMMANDS and not argv[0].startswith("-"):
         try:
