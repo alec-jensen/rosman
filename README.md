@@ -78,6 +78,26 @@ setup_script: null            # optional -- path to a shell script rosman runs d
 registry_image: null          # optional -- share one built image across a team; see below
 ```
 
+### Per-machine overrides: `rosman.local.yml`
+
+Some fields are inherently machine-specific — a USB serial adapter or
+camera is very unlikely to land at the same `/dev` path (or COM port) on
+every teammate's machine. Put those in a `rosman.local.yml` next to
+`rosman.yml`; `rosman init` automatically adds it to your `.gitignore` if
+one already exists (or add it yourself: `echo rosman.local.yml >>
+.gitignore`).
+
+```yaml
+# rosman.local.yml -- not checked in
+devices: ["/dev/ttyUSB3"]
+```
+
+Any field set in `rosman.local.yml` replaces the corresponding value from
+`rosman.yml` entirely (a list like `devices` is swapped wholesale, not
+merged item-by-item). Fields not mentioned in the override come from
+`rosman.yml` as usual. The override file is optional — if it doesn't
+exist, `rosman.yml` resolves exactly as if it weren't supported at all.
+
 ### Custom base images and setup scripts
 
 Projects with heavier requirements — CUDA, a vendor SDK, anything that

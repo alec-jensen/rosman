@@ -2,7 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from rosman.config import ConfigError, find_config_file, load_config, parse_config, resolve_config
+from rosman.config import (
+    ConfigError,
+    find_config_file,
+    load_config,
+    local_override_path,
+    parse_config,
+    resolve_config,
+)
 
 MINIMAL = "ros_distro: humble\n"
 
@@ -210,3 +217,66 @@ def test_load_config_reads_file(tmp_path: Path):
     path.write_text(MINIMAL)
     config = load_config(path)
     assert config.ros_distro == "humble"
+
+
+def test_local_override_path_naming():
+    assert local_override_path(Path("/proj/rosman.yml")) == Path("/proj/rosman.local.yml")
+    assert local_override_path(Path("/proj/.rosman.yaml")) == Path("/proj/.rosman.local.yaml")
+
+
+def test_local_override_replaces_devices(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    path.write_text("ros_distro: humble\ndevices: [\"/dev/ttyUSB0\"]\n")
+    (tmp_path / "rosman.local.yml").write_text('devices: ["/dev/ttyUSB3"]\n')
+
+    config = load_config(path)
+
+    assert config.devices == ["/dev/ttyUSB3"]
+    assert config.ros_distro == "humble"  # untouched fields still come from the main file
+
+
+def test_local_override_is_optional(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    path.write_text(MINIMAL)
+    # No rosman.local.yml present -- must resolve exactly as before.
+    config = load_config(path)
+    assert config.devices == []
+
+
+def test_local_override_values_are_validated(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    path.write_text(MINIMAL)
+    (tmp_path / "rosman.local.yml").write_text("gpu: not-a-bool\n")
+
+    with pytest.raises(ConfigError, match="gpu"):
+        load_config(path)
+
+
+def test_local_override_can_be_malformed_yaml_and_errors_clearly(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    path.write_text(MINIMAL)
+    (tmp_path / "rosman.local.yml").write_text("devices: [unterminated\n")
+
+    with pytest.raises(ConfigError, match="rosman.local.yml"):
+        load_config(path)
+
+
+def test_local_override_can_add_unknown_field_to_get_rejected(tmp_path: Path):
+    # Unknown-field rejection still applies to the *merged* result -- a
+    # typo in the local override shouldn't silently do nothing.
+    path = tmp_path / "rosman.yml"
+    path.write_text(MINIMAL)
+    (tmp_path / "rosman.local.yml").write_text("devcies: [\"/dev/ttyUSB0\"]\n")
+
+    with pytest.raises(ConfigError, match="unrecognized"):
+        load_config(path)
+
+
+def test_resolve_config_applies_local_override(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    path.write_text("ros_distro: humble\ndomain_id: 5\n")
+    (tmp_path / "rosman.local.yml").write_text("domain_id: 42\n")
+
+    config = resolve_config(tmp_path)
+
+    assert config.domain_id == 42

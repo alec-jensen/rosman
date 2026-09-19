@@ -191,19 +191,31 @@ def _validate_setup_script(value: Any, path: Path) -> str | None:
     return value
 
 
+def _load_yaml_mapping(text: str, path: Path) -> dict[str, Any]:
+    try:
+        raw = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"{path} is not valid YAML: {exc}") from exc
+    return _require_mapping(raw, path)
+
+
 def parse_config(text: str, path: Path) -> RosmanConfig:
     """Parse and validate already-read YAML text into a RosmanConfig.
 
     Raises ConfigError with a human-readable message (never a raw YAML/Python
     traceback) on any problem.
     """
-    try:
-        raw = yaml.safe_load(text)
-    except yaml.YAMLError as exc:
-        raise ConfigError(f"{path} is not valid YAML: {exc}") from exc
+    data = _load_yaml_mapping(text, path)
+    return _build_config(data, path)
 
-    data = _require_mapping(raw, path)
 
+def _build_config(data: dict[str, Any], path: Path) -> RosmanConfig:
+    """Validate an already-loaded (and, for a local override, already-merged)
+    mapping and build the effective RosmanConfig. `path` is used only for
+    error messages and as the dataclass's `config_path` (which
+    `workspace_root`/`project_root` resolve relative to) -- when a local
+    override was merged in, this is still the *main* rosman.yml's path, not
+    the override's, so those stay anchored to the checked-in project root."""
     missing = [f for f in REQUIRED_FIELDS if f not in data]
     if missing:
         raise ConfigError(
@@ -281,12 +293,37 @@ def parse_config(text: str, path: Path) -> RosmanConfig:
     )
 
 
+def local_override_path(config_path: Path) -> Path:
+    """The machine-local override file for a given rosman.yml -- e.g.
+    `rosman.yml` -> `rosman.local.yml`, `.rosman.yaml` -> `.rosman.local.yaml`.
+    Meant to be gitignored: for values that are inherently per-machine, most
+    notably `devices:` (a USB serial adapter or camera is very unlikely to
+    land at the same /dev path, or COM port, on every teammate's machine)."""
+    return config_path.with_name(f"{config_path.stem}.local{config_path.suffix}")
+
+
 def load_config(path: Path) -> RosmanConfig:
     try:
         text = path.read_text()
     except OSError as exc:
         raise ConfigError(f"Could not read {path}: {exc}") from exc
-    return parse_config(text, path)
+    data = _load_yaml_mapping(text, path)
+
+    override_path = local_override_path(path)
+    if override_path.is_file():
+        try:
+            override_text = override_path.read_text()
+        except OSError as exc:
+            raise ConfigError(f"Could not read {override_path}: {exc}") from exc
+        override_data = _load_yaml_mapping(override_text, override_path)
+        # Shallow, key-level override: any field present locally replaces
+        # the checked-in value wholesale (a list like `devices` is swapped
+        # entirely, not merged element-by-element) -- simple and predictable,
+        # and matches the actual use case of "this one field is different on
+        # my machine," not partial list editing.
+        data = {**data, **override_data}
+
+    return _build_config(data, path)
 
 
 def resolve_config(start: Path | None = None) -> RosmanConfig:

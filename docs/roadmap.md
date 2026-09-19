@@ -289,6 +289,16 @@ addendum.
   dev environment.
 - Not done: versioned release tags (still `0.0.0`, see below).
 
+## Phase 8 — per-machine config overrides — done
+`rosman.local.yml` (`rosman/config.py::local_override_path`): a gitignored,
+optional file next to `rosman.yml` whose fields shallow-override the
+checked-in config — for values that are inherently per-machine, most
+notably `devices:` (a USB serial adapter or camera won't land at the same
+path on every teammate's machine). `rosman init` auto-appends it to an
+existing `.gitignore`. Validated through the same per-field validators as
+the main config (applied to the merged dict), so a bad override value
+fails the same way a bad main-config value would.
+
 ## Versioning
 Package is currently unreleased (`0.0.0` in both `pyproject.toml` and
 `rosman.__version__`). `0.0.1` gets tagged once Alec confirms there's a

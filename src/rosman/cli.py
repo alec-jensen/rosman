@@ -39,7 +39,25 @@ workspace_dir: .              # path (relative to this file) mounted as the cont
 extra_apt_packages: []        # optional list, installed into the image on first build
 restart_policy: "no"          # docker restart policy; "no" (default) requires explicit `rosman up`
                                # after a host reboot -- see docs/spec.md #6 for why
+
+# Per-machine overrides (e.g. a device that's at a different path on your
+# machine) go in a gitignored rosman.local.yml next to this file -- any
+# field set there replaces the value here. See README.md.
 """
+
+GITIGNORE_ENTRY = "rosman.local.yml"
+
+
+def _ensure_gitignored(target_dir: Path) -> None:
+    gitignore_path = target_dir / ".gitignore"
+    if not gitignore_path.is_file():
+        return
+    existing = gitignore_path.read_text()
+    if GITIGNORE_ENTRY in existing:
+        return
+    separator = "" if existing.endswith("\n") or not existing else "\n"
+    gitignore_path.write_text(f"{existing}{separator}{GITIGNORE_ENTRY}\n")
+    console.print(f"Added {GITIGNORE_ENTRY!r} to {gitignore_path}")
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -56,6 +74,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         return 1
     config_path.write_text(INIT_TEMPLATE.format(distro=args.distro))
     console.print(f"[green]Created {config_path}[/green]")
+    _ensure_gitignored(target_dir)
     return 0
 
 
