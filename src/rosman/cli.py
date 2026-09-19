@@ -1,0 +1,290 @@
+"""`rosman` entrypoint.
+
+Reserved rosman subcommands (init/up/down/status/rebuild/doctor/shell) are
+handled here directly. Anything else is assumed to be a `ros2`/`colcon`
+passthrough call and is forwarded verbatim into the workspace container —
+rosman does not reimplement any part of the ros2 CLI surface (spec §2.3).
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+from rich.console import Console
+from rich.table import Table
+
+from rosman import __version__
+from rosman.config import KNOWN_ROS_DISTROS, RosmanConfig, resolve_config
+from rosman.dispatch import RESERVED_COMMANDS, dispatch_passthrough, shell_command, translate_cwd
+from rosman.docker_client import get_client
+from rosman.doctor import run_checks
+from rosman.errors import RosmanError
+from rosman.lifecycle import ContainerManager
+from rosman.state import RosmanState
+
+console = Console()
+err_console = Console(stderr=True)
+
+INIT_TEMPLATE = """\
+ros_distro: {distro}          # required -- any distro with an official ros:<tag> image
+rmw_implementation: cyclonedds  # default; cyclonedds is the only supported path today
+domain_id: auto               # "auto" assigns + persists one per project; or an explicit int
+network: default               # Docker network group; shared projects can discover each other
+gpu: false                    # true enables nvidia-container-toolkit passthrough
+devices: []                   # e.g. ["/dev/ttyUSB0"]
+workspace_dir: .              # path (relative to this file) mounted as the container workspace root
+extra_apt_packages: []        # optional list, installed into the image on first build
+"""
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    target_dir = Path(args.path).resolve()
+    config_path = target_dir / "rosman.yml"
+    if config_path.exists() and not args.force:
+        err_console.print(f"[red]{config_path} already exists.[/red] Use --force to overwrite.")
+        return 1
+    if args.distro not in KNOWN_ROS_DISTROS - {"noetic"}:
+        err_console.print(
+            f"[red]Unknown ros_distro '{args.distro}'.[/red] Expected one of: "
+            f"{', '.join(sorted(KNOWN_ROS_DISTROS - {'noetic'}))}"
+        )
+        return 1
+    config_path.write_text(INIT_TEMPLATE.format(distro=args.distro))
+    console.print(f"[green]Created {config_path}[/green]")
+    return 0
+
+
+def _load_config_or_exit() -> RosmanConfig:
+    try:
+        return resolve_config()
+    except RosmanError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise SystemExit(1) from None
+
+
+def cmd_up(args: argparse.Namespace) -> int:
+    config = _load_config_or_exit()
+    client = get_client()
+    state = RosmanState.load()
+    manager = ContainerManager(client, state)
+
+    existing = manager.find_container(config)
+    if existing is not None:
+        existing.reload()
+        drift = manager.detect_drift(existing, config)
+        if drift.drifted and not args.force:
+            err_console.print(
+                f"[yellow]Container config has drifted from {config.config_path}:[/yellow]"
+            )
+            for reason in drift.reasons:
+                err_console.print(f"  - {reason}")
+            err_console.print("Run `rosman rebuild` to recreate it, or `rosman up --force`.")
+            return 1
+
+    console.print(
+        f"Starting rosman container for this workspace ({config.ros_distro})..."
+    )
+    container, created = manager.ensure_running(config)
+    verb = "Started" if not created else "Created and started"
+    console.print(f"[green]{verb}[/green] {container.name}")
+    return 0
+
+
+def cmd_down(args: argparse.Namespace) -> int:
+    config = _load_config_or_exit()
+    client = get_client()
+    state = RosmanState.load()
+    manager = ContainerManager(client, state)
+
+    if args.remove:
+        removed = manager.remove(config)
+        if removed:
+            console.print(f"[green]Removed[/green] container for {config.project_name}")
+        else:
+            console.print("No container to remove.")
+        return 0
+
+    stopped = manager.stop(config)
+    if stopped:
+        console.print(f"[green]Stopped[/green] container for {config.project_name}")
+    else:
+        console.print("No running container for this workspace.")
+    return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    client = get_client()
+    state = RosmanState.load()
+    manager = ContainerManager(client, state)
+
+    from rosman.docker_client import (
+        DISTRO_LABEL,
+        DOMAIN_ID_LABEL,
+        NETWORK_GROUP_LABEL,
+        WORKSPACE_LABEL,
+    )
+
+    containers = manager.list_managed()
+    if not containers:
+        console.print("No rosman-managed containers found.")
+        return 0
+
+    table = Table()
+    table.add_column("name")
+    table.add_column("status")
+    table.add_column("distro")
+    table.add_column("network")
+    table.add_column("domain id")
+    table.add_column("workspace")
+    for container in containers:
+        labels = container.labels or {}
+        table.add_row(
+            container.name,
+            container.status,
+            labels.get(DISTRO_LABEL, "?"),
+            labels.get(NETWORK_GROUP_LABEL, "?"),
+            labels.get(DOMAIN_ID_LABEL, "?"),
+            labels.get(WORKSPACE_LABEL, "?"),
+        )
+    console.print(table)
+    return 0
+
+
+def cmd_rebuild(args: argparse.Namespace) -> int:
+    config = _load_config_or_exit()
+    client = get_client()
+    state = RosmanState.load()
+    manager = ContainerManager(client, state)
+
+    if not args.yes:
+        answer = input(
+            f"This will destroy and recreate the container for {config.project_name} "
+            "(build/install/log volumes are preserved). Continue? [y/N] "
+        )
+        if answer.strip().lower() not in ("y", "yes"):
+            console.print("Aborted.")
+            return 1
+
+    console.print(f"Rebuilding container for this workspace ({config.ros_distro})...")
+    container = manager.rebuild(config)
+    console.print(f"[green]Rebuilt[/green] {container.name}")
+    return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    config = _load_config_or_exit()
+    checks = run_checks(config)
+    ok = True
+    for check in checks:
+        icon = "[green]OK[/green]  " if check.ok else "[red]FAIL[/red]"
+        console.print(f"{icon} {check.name}: {check.detail}")
+        ok = ok and check.ok
+    return 0 if ok else 1
+
+
+def cmd_shell(args: argparse.Namespace) -> int:
+    config = _load_config_or_exit()
+    client = get_client()
+    state = RosmanState.load()
+    manager = ContainerManager(client, state)
+    container, _ = manager.ensure_running(config)
+    workdir = translate_cwd(config)
+    return shell_command(container.name, workdir, shell=args.shell)
+
+
+def cmd_passthrough(args: list[str]) -> int:
+    config = _load_config_or_exit()
+    client = get_client()
+    state = RosmanState.load()
+    manager = ContainerManager(client, state)
+    container, created = manager.ensure_running(config)
+    if created:
+        console.print(
+            f"Starting rosman container for this workspace ({config.ros_distro})..."
+        )
+    workdir = translate_cwd(config)
+    return dispatch_passthrough(args, container.name, workdir)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="rosman",
+        description=(
+            "Run ROS 2 anywhere without installing it natively. Any command that isn't "
+            "one of rosman's own subcommands below is forwarded to `ros2`/`colcon` inside "
+            "this workspace's container."
+        ),
+    )
+    parser.add_argument("--version", action="version", version=f"rosman {__version__}")
+    subparsers = parser.add_subparsers(dest="command")
+
+    p_init = subparsers.add_parser("init", help="Scaffold a rosman.yml in the current directory")
+    p_init.add_argument("--distro", default="humble", help="ROS 2 distro (default: humble)")
+    p_init.add_argument("--path", default=".", help="Directory to write rosman.yml into")
+    p_init.add_argument("--force", action="store_true", help="Overwrite an existing rosman.yml")
+    p_init.set_defaults(func=cmd_init)
+
+    p_up = subparsers.add_parser("up", help="Start (or create) the workspace container")
+    p_up.add_argument(
+        "--force", action="store_true", help="Start even if the container has config drift"
+    )
+    p_up.set_defaults(func=cmd_up)
+
+    p_down = subparsers.add_parser("down", help="Stop the workspace container")
+    p_down.add_argument(
+        "--remove", action="store_true", help="Remove the container instead of just stopping it"
+    )
+    p_down.set_defaults(func=cmd_down)
+
+    p_status = subparsers.add_parser("status", help="List rosman-managed containers")
+    p_status.set_defaults(func=cmd_status)
+
+    p_rebuild = subparsers.add_parser("rebuild", help="Force-recreate the workspace container")
+    p_rebuild.add_argument("-y", "--yes", action="store_true", help="Skip the confirmation prompt")
+    p_rebuild.set_defaults(func=cmd_rebuild)
+
+    p_doctor = subparsers.add_parser("doctor", help="Run environment/config sanity checks")
+    p_doctor.set_defaults(func=cmd_doctor)
+
+    p_shell = subparsers.add_parser("shell", help="Open an interactive shell in the container")
+    p_shell.add_argument("--shell", default="bash", help="Shell to run (default: bash)")
+    p_shell.set_defaults(func=cmd_shell)
+
+    def _print_help(_args: argparse.Namespace) -> int:
+        parser.print_help()
+        return 0
+
+    p_help = subparsers.add_parser("help", help="Show this help message")
+    p_help.set_defaults(func=_print_help)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+
+    if argv and argv[0] not in RESERVED_COMMANDS and not argv[0].startswith("-"):
+        try:
+            return cmd_passthrough(argv)
+        except RosmanError as exc:
+            err_console.print(f"[red]{exc}[/red]")
+            return 1
+
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if not getattr(args, "func", None):
+        parser.print_help()
+        return 0
+    try:
+        return args.func(args)
+    except RosmanError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        return 1
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
