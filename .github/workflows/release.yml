@@ -165,10 +165,16 @@ jobs:
             gzip -9c dists/stable/main/binary-amd64/Packages > dists/stable/main/binary-amd64/Packages.gz
           '
           python3 packaging/generate-apt-release.py public/apt
-          gpg --homedir /tmp/gnupg --batch --pinentry-mode loopback \
+          # --yes: InRelease/Release.gpg are fixed filenames that already
+          # exist from the previous release (gh-pages persists them across
+          # runs so old package versions stay installable) -- gpg refuses
+          # to overwrite an existing -o target without it. Hit this exact
+          # "File exists" failure on the second real release this pipeline
+          # ever ran.
+          gpg --homedir /tmp/gnupg --batch --yes --pinentry-mode loopback \
             --passphrase "${{ secrets.RELEASE_GPG_PASSPHRASE }}" --local-user "$GPG_KEY_ID" \
             --clearsign -o public/apt/dists/stable/InRelease public/apt/dists/stable/Release
-          gpg --homedir /tmp/gnupg --batch --pinentry-mode loopback \
+          gpg --homedir /tmp/gnupg --batch --yes --pinentry-mode loopback \
             --passphrase "${{ secrets.RELEASE_GPG_PASSPHRASE }}" --local-user "$GPG_KEY_ID" \
             --detach-sign -a -o public/apt/dists/stable/Release.gpg public/apt/dists/stable/Release
 
@@ -185,8 +191,9 @@ jobs:
             set -e
             dnf install -y -q createrepo_c > /dev/null
             cd /repo
+            rm -rf repodata
             createrepo_c .
-            gpg --homedir /gpghome --batch --pinentry-mode loopback \
+            gpg --homedir /gpghome --batch --yes --pinentry-mode loopback \
               --passphrase "${{ secrets.RELEASE_GPG_PASSPHRASE }}" --local-user '"$GPG_KEY_ID"' \
               --detach-sign -a -o repodata/repomd.xml.asc repodata/repomd.xml
           '
@@ -209,8 +216,9 @@ jobs:
             pacman -Sy --noconfirm --needed pacman-contrib > /dev/null 2>&1
             cd /repo
             repo-add rosman.db.tar.gz rosman-${VERSION}-1-x86_64.pkg.tar.zst
+            rm -f rosman.db.tar.gz.sig rosman.files.tar.gz.sig
             for f in rosman.db.tar.gz rosman.files.tar.gz; do
-              gpg --homedir /gpghome --batch --pinentry-mode loopback \
+              gpg --homedir /gpghome --batch --yes --pinentry-mode loopback \
                 --passphrase "${{ secrets.RELEASE_GPG_PASSPHRASE }}" --local-user '"$GPG_KEY_ID"' \
                 --detach-sign "$f"
             done
