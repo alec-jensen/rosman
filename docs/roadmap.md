@@ -2,6 +2,37 @@
 
 Tracking status against the phased build order in [`spec.md`](spec.md) §10.
 
+## Live verification (2026-09-19)
+
+Docker access on the dev machine was fixed and the core lifecycle got its
+first real end-to-end run against an actual daemon (previously everything
+below was only unit-tested with mocks). Confirmed working: `rosman up`
+(image build + container start), `ros2 topic list`/`pkg create`/`pkg list`
+passthrough, `colcon build`, the workspace overlay auto-sourcing on the
+very next command with no manual `source` step, `rosman shell` with piped
+non-interactive stdin, host-UID-matched file ownership on bind-mounted
+files, and — the design's highest-risk piece — `rosman doctor
+--network-check`'s two-container CycloneDDS talker/listener round trip,
+which passed on the first real attempt.
+
+This first live run also caught three real bugs that mocked tests
+structurally could not have caught (all fixed, all regression-tested where
+practical): `ros2`/`colcon` missing from `$PATH` on every `docker exec`
+(needed `/etc/profile.d` sourcing + routing commands through a login
+shell), piped/non-interactive stdin being silently discarded by `rosman
+shell` (an `-i` vs `-t` flag mixup), and `build`/`install`/`log` named
+volumes coming up root-owned so `colcon build` failed with EACCES (fixed
+by pre-creating and chowning those paths in the image before the volumes
+ever mount). A `DOCKERFILE_TEMPLATE_VERSION` constant was added to
+`compute_config_hash` specifically so future fixes like these actually
+invalidate existing users' cached images instead of leaving them stuck on
+an old, buggy build.
+
+Not yet verified live: `base_image`/`setup_script` (Phase 6, no real GPU/
+CUDA/vendor-SDK test performed yet), and all of Phase 4's Linux
+X11/GPU and Windows WSL2/WSLg/usbipd paths (this dev machine has no GPU,
+no X server exercised through Docker, and isn't Windows).
+
 ## Phase 1 — single container, no networking — done
 - Config resolver (`rosman/config.py`): finds/validates `rosman.yml`,
   walking up from cwd like `.git` discovery.
@@ -10,7 +41,9 @@ Tracking status against the phased build order in [`spec.md`](spec.md) §10.
   build with a host-UID/GID-matched user baked in (rocker-style), container
   create/start/stop/remove.
 - `ros2`/`colcon` passthrough (`rosman/dispatch.py`) with working-directory
-  translation into the container's mounted workspace.
+  translation into the container's mounted workspace. **Live-verified
+  2026-09-19** (see "Live verification" above) — this is also where the
+  `$PATH`/login-shell and piped-stdin bugs were found and fixed.
 
 ## Phase 2 — lifecycle robustness — done
 - Config drift detection (`ContainerManager.detect_drift`): compares
@@ -21,7 +54,9 @@ Tracking status against the phased build order in [`spec.md`](spec.md) §10.
   `rosman down --remove`.
 - Named volumes for `build/`, `install/`, `log/`, keyed by workspace +
   distro (`rosman/naming.py::volume_name`), separate from the source bind
-  mount.
+  mount. **Live-verified 2026-09-19** — this is also where the volume
+  ownership bug (root-owned volumes breaking `colcon build` under the
+  UID-matched user) was found and fixed.
 
 ## Phase 3 — networking — done
 - Shared bridge network per `network:` group (`rosman/networking.py`).
@@ -37,10 +72,8 @@ Tracking status against the phased build order in [`spec.md`](spec.md) §10.
   has `rmw_cyclonedds_cpp` installed), publishes on one, and confirms the
   other receives it within a timeout — the validation step spec §5 flags as
   highest priority. Off by default (opt-in flag) since it's slower and may
-  pull/build an image; unit-tested with a mocked Docker client (this dev
-  sandbox has Docker installed but no daemon permission, so the real
-  end-to-end path is still unverified against a live daemon — that's the
-  next thing to confirm on a machine with working Docker access).
+  pull/build an image. **Live-verified 2026-09-19**: the talker/listener
+  round trip passed against a real Docker daemon on the first attempt.
 
 ## Phase 4 — platform-specific extensions — done (needs live verification)
 - Linux: X11/XAuth mounting for GUI tools (rviz2/rqt/Gazebo)
