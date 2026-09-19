@@ -8,7 +8,7 @@ discovery does, so rosman commands work from any subdirectory of a project.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 import yaml
@@ -152,7 +152,19 @@ def _validate_setup_script(value: Any, path: Path) -> str | None:
         return None
     if not isinstance(value, str) or not value:
         raise ConfigError(f"{path}: 'setup_script' must be a non-empty relative path string.")
-    if Path(value).is_absolute() or ".." in Path(value).parts:
+    # rosman.yml is a portable config file that may be checked into a repo
+    # shared across Linux and Windows machines, so this must reject both
+    # path styles regardless of which OS is doing the validating -- the host
+    # `Path` alone won't catch a POSIX-style absolute path like "/etc/passwd"
+    # when rosman runs on Windows (WindowsPath treats it as drive-relative,
+    # not absolute).
+    posix, windows = PurePosixPath(value), PureWindowsPath(value)
+    if (
+        posix.is_absolute()
+        or windows.is_absolute()
+        or ".." in posix.parts
+        or ".." in windows.parts
+    ):
         raise ConfigError(
             f"{path}: 'setup_script' must be a path relative to this file, inside the "
             f"project (got {value!r})."
