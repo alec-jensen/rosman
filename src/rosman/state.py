@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from rosman.errors import RosmanError
+
 MIN_DOMAIN_ID = 0
 MAX_DOMAIN_ID = 232
 
@@ -102,7 +104,7 @@ class RosmanState:
                 project.domain_id = candidate
                 self.save()
                 return candidate
-        raise RuntimeError(
+        raise RosmanError(
             f"No free ROS_DOMAIN_ID left in [{MIN_DOMAIN_ID}, {MAX_DOMAIN_ID}] — "
             f"{len(used)} projects already have one assigned. Set domain_id explicitly "
             "in rosman.yml instead of using 'auto'."

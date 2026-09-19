@@ -126,14 +126,35 @@ vendor SDK) surfaced the gap. Full rationale in `spec.md`'s addendum.
   `base_image`/`setup_script` set against a live daemon to confirm the full
   build succeeds end to end (e.g. an actual ZED SDK install script).
 
-## Phase 5 — polish — not started
-- Working-directory translation edge cases (symlinked workspaces, devices
-  mounted outside `workspace_dir`).
-- Friendlier error messages throughout.
-- Packaging for distribution (pipx-installable release, versioned tags).
-- Versioning: package is currently unreleased (`0.0.0`); `0.0.1` gets
-  tagged once there's a stable working base confirmed against a live
-  Docker daemon.
+## Phase 5 — polish — mostly done
+- Working-directory translation edge cases: checked both flagged cases.
+  Symlinked workspaces already work correctly with no code changes needed
+  — `os.getcwd()`/`Path.cwd()` always return the real, symlink-resolved
+  path, and `config.workspace_root` is already `.resolve()`d, so
+  `translate_cwd` naturally handles a workspace reached via an unrelated
+  symlink alias (regression test added). `devices:` entries were never
+  actually workspace-relative in the first place — they're host-absolute
+  paths mapped 1:1 into the container — so "devices mounted outside
+  workspace_dir" wasn't a real gap to begin with.
+- Friendlier error messages: added a `DockerException` safety net in
+  `cli.py::main` so any docker-py error a specific code path didn't
+  already wrap into a clean `RosmanError` (a name conflict, an invalid
+  device path, "could not select device driver" for a missing GPU
+  runtime, etc.) still prints one line instead of a raw traceback. Also
+  fixed `RosmanState.assign_domain_id` raising a bare `RuntimeError`
+  (domain ID exhaustion) instead of `RosmanError`, which would have
+  slipped past that same safety net.
+- Packaging: verified for real, not just assumed — `uv build` produces a
+  standard wheel, and `pipx install dist/rosman-*.whl` installs and runs
+  correctly as a standalone `rosman` command with no dependency on the
+  dev environment.
+- Not done: versioned release tags (still `0.0.0`, see below).
+
+## Versioning
+Package is currently unreleased (`0.0.0` in both `pyproject.toml` and
+`rosman.__version__`). `0.0.1` gets tagged once Alec confirms there's a
+stable working base — that milestone call is his to make, not something
+to infer from test/CI status alone.
 
 ## Explicitly deferred (see spec §9)
 - macOS.

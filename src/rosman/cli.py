@@ -12,6 +12,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from docker.errors import DockerException
 from rich.console import Console
 from rich.table import Table
 
@@ -286,6 +287,9 @@ def main(argv: list[str] | None = None) -> int:
         except RosmanError as exc:
             err_console.print(f"[red]{exc}[/red]")
             return 1
+        except DockerException as exc:
+            err_console.print(f"[red]Docker error:[/red] {exc}")
+            return 1
 
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -296,6 +300,14 @@ def main(argv: list[str] | None = None) -> int:
         return args.func(args)
     except RosmanError as exc:
         err_console.print(f"[red]{exc}[/red]")
+        return 1
+    except DockerException as exc:
+        # Safety net: anything from docker-py that a specific code path
+        # didn't already wrap into a clean RosmanError (a name conflict, an
+        # invalid device path, "could not select device driver" for a
+        # missing GPU runtime, etc.) still gets a one-line message instead
+        # of a raw traceback.
+        err_console.print(f"[red]Docker error:[/red] {exc}")
         return 1
     except KeyboardInterrupt:
         return 130

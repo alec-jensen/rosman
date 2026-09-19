@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from rosman.errors import RosmanError
 from rosman.state import RosmanState
 
 
@@ -56,5 +57,5 @@ def test_exhausted_domain_id_range_raises(tmp_path: Path):
         state.get_project(tmp_path / f"ws-{i}").domain_id = i
     state.save()
 
-    with pytest.raises(RuntimeError, match="No free ROS_DOMAIN_ID"):
+    with pytest.raises(RosmanError, match="No free ROS_DOMAIN_ID"):
         state.assign_domain_id(tmp_path / "ws-overflow")
