@@ -11,8 +11,8 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from docker.errors import DockerException
 from rich.console import Console
 from rich.table import Table
 
@@ -21,13 +21,17 @@ from rosman.completion import BASH_SCRIPT, ZSH_SCRIPT
 from rosman.completion import complete as complete_words
 from rosman.config import KNOWN_ROS_DISTROS, RosmanConfig, resolve_config
 from rosman.dispatch import RESERVED_COMMANDS, dispatch_passthrough, shell_command, translate_cwd
-from rosman.docker_client import get_client
-from rosman.doctor import run_checks
 from rosman.errors import RosmanError
-from rosman.lifecycle import ContainerManager, ImageResult
 from rosman.progress import RichReporter
 from rosman.state import RosmanState
 from rosman.update_check import check_for_update, pending_notice
+
+if TYPE_CHECKING:
+    # Deferred at runtime -- see main()'s `__complete` fast path, which
+    # must not pay for importing docker-py (measured ~100ms) on every
+    # keystroke of tab-completion. Each cmd_* below that actually talks to
+    # Docker imports these locally instead.
+    from rosman.lifecycle import ContainerManager, ImageResult
 
 console = Console()
 err_console = Console(stderr=True)
@@ -91,6 +95,9 @@ def _load_config_or_exit() -> RosmanConfig:
 
 
 def cmd_up(args: argparse.Namespace) -> int:
+    from rosman.docker_client import get_client
+    from rosman.lifecycle import ContainerManager
+
     config = _load_config_or_exit()
     client = get_client()
     state = RosmanState.load()
@@ -133,6 +140,9 @@ def _print_image_source(config: RosmanConfig, result: ImageResult) -> None:
 
 
 def cmd_down(args: argparse.Namespace) -> int:
+    from rosman.docker_client import get_client
+    from rosman.lifecycle import ContainerManager
+
     config = _load_config_or_exit()
     client = get_client()
     state = RosmanState.load()
@@ -155,16 +165,18 @@ def cmd_down(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    client = get_client()
-    state = RosmanState.load()
-    manager = ContainerManager(client, state)
-
     from rosman.docker_client import (
         DISTRO_LABEL,
         DOMAIN_ID_LABEL,
         NETWORK_GROUP_LABEL,
         WORKSPACE_LABEL,
+        get_client,
     )
+    from rosman.lifecycle import ContainerManager
+
+    client = get_client()
+    state = RosmanState.load()
+    manager = ContainerManager(client, state)
 
     containers = manager.list_managed()
     if not containers:
@@ -193,6 +205,9 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_rebuild(args: argparse.Namespace) -> int:
+    from rosman.docker_client import get_client
+    from rosman.lifecycle import ContainerManager
+
     config = _load_config_or_exit()
     client = get_client()
     state = RosmanState.load()
@@ -221,6 +236,8 @@ def cmd_rebuild(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
+    from rosman.doctor import run_checks
+
     config = _load_config_or_exit()
     checks = run_checks(config, network_check=args.network_check)
     ok = True
@@ -249,6 +266,9 @@ def _ensure_running_with_notice(manager: ContainerManager, config: RosmanConfig)
 
 
 def cmd_shell(args: argparse.Namespace) -> int:
+    from rosman.docker_client import get_client
+    from rosman.lifecycle import ContainerManager
+
     config = _load_config_or_exit()
     client = get_client()
     state = RosmanState.load()
@@ -259,6 +279,9 @@ def cmd_shell(args: argparse.Namespace) -> int:
 
 
 def cmd_push(args: argparse.Namespace) -> int:
+    from rosman.docker_client import get_client
+    from rosman.lifecycle import ContainerManager
+
     config = _load_config_or_exit()
     if config.registry_image:
         console.print(f"Pushing image to {config.registry_image}...")
@@ -280,12 +303,12 @@ def cmd_complete(args: argparse.Namespace) -> int:
     """Backs the installed shell completion function (`rosman completion
     bash`/`zsh`) -- never a human-facing command. Must never raise, print
     anything but candidates, or start a container: Tab is not `rosman up`.
+    Deliberately avoids docker-py entirely (see completion.py's docstring)
+    since this runs on every keystroke of tab-completion.
     """
     try:
         config = resolve_config()
-        client = get_client()
-        state = RosmanState.load()
-        for candidate in complete_words(client, state, config, args.words):
+        for candidate in complete_words(config, args.words):
             print(candidate)
     except Exception:
         pass
@@ -293,6 +316,9 @@ def cmd_complete(args: argparse.Namespace) -> int:
 
 
 def cmd_passthrough(args: list[str]) -> int:
+    from rosman.docker_client import get_client
+    from rosman.lifecycle import ContainerManager
+
     config = _load_config_or_exit()
     client = get_client()
     state = RosmanState.load()
@@ -401,11 +427,20 @@ def _maybe_show_update_notice() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    # Tab completion fires on every keystroke -- an update notice (or its
-    # throttled background network check) popping up mid-typing would be
-    # bizarre, so `__complete` is the one reserved command that skips it.
-    if not (argv and argv[0] == "__complete"):
-        _maybe_show_update_notice()
+
+    if argv and argv[0] == "__complete":
+        # Kept fully separate from dispatch below, on purpose: this fires
+        # on every keystroke of tab-completion, so it must never pay for
+        # importing docker-py (measured ~100ms) the way every other
+        # command legitimately does -- no update-notice check, no
+        # `DockerException` import, no argparse subparser construction.
+        # `cmd_complete` already catches everything itself and never
+        # raises, so none of that machinery is needed here anyway.
+        return cmd_complete(argparse.Namespace(words=argv[1:]))
+
+    _maybe_show_update_notice()
+
+    from docker.errors import DockerException
 
     if argv and argv[0] not in RESERVED_COMMANDS and not argv[0].startswith("-"):
         try:

@@ -25,11 +25,21 @@ doesn't need to reimplement any completion logic, just relay the protocol:
   3. Candidates are relayed back to stdout, one per line, for the shell
      function to feed into `COMPREPLY`.
 
-This must never trigger a container build/start (`find_container`, not
-`ensure_running`) -- pressing Tab is not a "start my workspace" action, and
-must never hang the shell, so the docker exec runs with a short timeout and
-every failure mode (no config, no container, container not running, docker
-error, timeout) just yields zero candidates rather than an error.
+This must never trigger a container build/start -- pressing Tab is not a
+"start my workspace" action -- and must never hang the shell, so the
+container-running check and the docker exec both run with short timeouts,
+and every failure mode (no config, no container, container not running,
+docker error, timeout) just yields zero candidates rather than an error.
+
+This fires on every keystroke of a passthrough completion, so it
+deliberately avoids importing docker-py (measured: ~100ms just to import
+the `docker` package, dwarfing rosman's own actual logic here) in favor of
+a plain `docker inspect` subprocess call -- see `cli.main`'s early
+`__complete` branch, which keeps this path from pulling in any of cli.py's
+other docker-py-dependent imports either. `ros2`/`colcon`'s own CLI
+startup (~350-450ms, confirmed by measuring it directly) still dominates
+total latency and is outside rosman's control -- native `ros2 <TAB>` has
+the same cost.
 """
 
 from __future__ import annotations
@@ -40,7 +50,7 @@ import subprocess
 
 from rosman.config import RosmanConfig
 from rosman.dispatch import CONTAINER_WORKSPACE_PATH
-from rosman.lifecycle import ContainerManager
+from rosman.naming import container_name
 
 _ARGCOMPLETE_IFS = "\013"
 _COMPLETE_TIMEOUT_SECONDS = 3
@@ -106,26 +116,41 @@ def build_inner_command(words: list[str]) -> list[str] | None:
     return ["ros2", *words]
 
 
-def complete(
-    client, state, config: RosmanConfig, words: list[str]
-) -> list[str]:
+_INSPECT_TIMEOUT_SECONDS = 2
+
+
+def _running_container_name(config: RosmanConfig, docker_bin: str) -> str | None:
+    """Whether this workspace's container exists and is running, without
+    docker-py: `naming.container_name` is a pure function of the workspace
+    path (the same name `ContainerManager.find_container` would resolve
+    to), so a single `docker inspect` call is all that's needed here."""
+    name = container_name(config.workspace_root)
+    try:
+        result = subprocess.run(
+            [docker_bin, "inspect", "-f", "{{.State.Running}}", name],
+            capture_output=True,
+            text=True,
+            timeout=_INSPECT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0 or result.stdout.strip() != "true":
+        return None
+    return name
+
+
+def complete(config: RosmanConfig, words: list[str]) -> list[str]:
     """Best-effort completion candidates for the given passthrough words.
     Never raises -- any failure just means no completions this time."""
     inner = build_inner_command(words)
     if inner is None:
         return []
-    try:
-        manager = ContainerManager(client, state)
-        container = manager.find_container(config)
-        if container is None:
-            return []
-        container.reload()
-        if container.status != "running":
-            return []
-        docker_bin = shutil.which("docker")
-        if docker_bin is None:
-            return []
-    except Exception:
+    docker_bin = shutil.which("docker")
+    if docker_bin is None:
+        return []
+    container_name_ = _running_container_name(config, docker_bin)
+    if container_name_ is None:
         return []
 
     inner_line = shlex.join(inner)
@@ -139,7 +164,7 @@ def complete(
         "exec",
         "-w",
         CONTAINER_WORKSPACE_PATH,
-        container.name,
+        container_name_,
         "bash",
         "-lc",
         relay,

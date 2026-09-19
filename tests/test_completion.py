@@ -33,76 +33,91 @@ def test_build_inner_command_none_for_reserved_first_word():
 
 def test_complete_returns_empty_for_reserved_words(tmp_path: Path):
     config = make_config(tmp_path)
-    result = complete(MagicMock(), MagicMock(), config, ["doctor"])
+    result = complete(config, ["doctor"])
     assert result == []
+
+
+def _fake_run(inspect_returncode=0, inspect_stdout="true", exec_stdout=b""):
+    """A `subprocess.run` stand-in that tells apart the `docker inspect`
+    call `complete()` makes first from the `docker exec` relay it makes
+    second, by looking for each subcommand in argv -- both go through the
+    same patched function since `complete()` no longer takes a docker-py
+    client/state to swap out (it's deliberately docker-py-free now, see
+    completion.py's docstring)."""
+
+    def _run(argv, **kwargs):
+        result = MagicMock()
+        if "inspect" in argv:
+            result.returncode = inspect_returncode
+            result.stdout = inspect_stdout
+        else:
+            result.returncode = 0
+            result.stdout = exec_stdout
+        return result
+
+    return _run
 
 
 def test_complete_returns_empty_when_no_container(tmp_path: Path, monkeypatch):
     config = make_config(tmp_path)
-    monkeypatch.setattr(
-        "rosman.completion.ContainerManager.find_container", lambda self, config: None
-    )
-    result = complete(MagicMock(), MagicMock(), config, ["topic", "ec"])
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr(subprocess, "run", _fake_run(inspect_returncode=1, inspect_stdout=""))
+
+    result = complete(config, ["topic", "ec"])
     assert result == []
 
 
 def test_complete_returns_empty_when_container_not_running(tmp_path: Path, monkeypatch):
     config = make_config(tmp_path)
-    container = MagicMock()
-    container.status = "exited"
-    monkeypatch.setattr(
-        "rosman.completion.ContainerManager.find_container", lambda self, config: container
-    )
-    result = complete(MagicMock(), MagicMock(), config, ["topic", "ec"])
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr(subprocess, "run", _fake_run(inspect_stdout="false"))
+
+    result = complete(config, ["topic", "ec"])
     assert result == []
 
 
 def test_complete_relays_ifs_separated_output(tmp_path: Path, monkeypatch):
     config = make_config(tmp_path)
-    container = MagicMock()
-    container.status = "running"
-    container.name = "rosman-test"
-    monkeypatch.setattr(
-        "rosman.completion.ContainerManager.find_container", lambda self, config: container
-    )
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/docker")
-    fake_result = MagicMock()
-    fake_result.stdout = b"echo\x0becho_sub\x0b"
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: fake_result)
+    monkeypatch.setattr(subprocess, "run", _fake_run(exec_stdout=b"echo\x0becho_sub\x0b"))
 
-    result = complete(MagicMock(), MagicMock(), config, ["topic", "ec"])
+    result = complete(config, ["topic", "ec"])
     assert result == ["echo", "echo_sub"]
 
 
 def test_complete_returns_empty_on_subprocess_error(tmp_path: Path, monkeypatch):
     config = make_config(tmp_path)
-    container = MagicMock()
-    container.status = "running"
-    container.name = "rosman-test"
-    monkeypatch.setattr(
-        "rosman.completion.ContainerManager.find_container", lambda self, config: container
-    )
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/docker")
+
+    def flaky_run(argv, **kwargs):
+        if "inspect" in argv:
+            return _fake_run()(argv, **kwargs)
+        raise subprocess.TimeoutExpired(cmd="docker", timeout=3)
+
+    monkeypatch.setattr(subprocess, "run", flaky_run)
+
+    result = complete(config, ["topic", "ec"])
+    assert result == []
+
+
+def test_complete_returns_empty_on_inspect_error(tmp_path: Path, monkeypatch):
+    config = make_config(tmp_path)
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/docker")
 
     def raise_timeout(*a, **k):
-        raise subprocess.TimeoutExpired(cmd="docker", timeout=3)
+        raise subprocess.TimeoutExpired(cmd="docker", timeout=2)
 
     monkeypatch.setattr(subprocess, "run", raise_timeout)
 
-    result = complete(MagicMock(), MagicMock(), config, ["topic", "ec"])
+    result = complete(config, ["topic", "ec"])
     assert result == []
 
 
 def test_complete_returns_empty_without_docker_binary(tmp_path: Path, monkeypatch):
     config = make_config(tmp_path)
-    container = MagicMock()
-    container.status = "running"
-    monkeypatch.setattr(
-        "rosman.completion.ContainerManager.find_container", lambda self, config: container
-    )
     monkeypatch.setattr("shutil.which", lambda name: None)
 
-    result = complete(MagicMock(), MagicMock(), config, ["topic", "ec"])
+    result = complete(config, ["topic", "ec"])
     assert result == []
 
 

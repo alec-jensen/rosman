@@ -588,3 +588,46 @@ real `bash` and a real `zsh` process, not just the two unit tests that
 exercise `build_inner_command`/`complete` directly (those never touched
 the actual shell-script text, which is exactly how this shipped broken in
 v0.1.0 despite tests passing).
+
+## Tab-completion latency (2026-09-19, v0.1.2)
+
+Alec: "is there any way to make the tab completion faster?" Measured
+before guessing, using real `time` output against a real running
+container, layer by layer:
+
+- Bare `docker exec ... true` (the container boundary itself): ~52ms.
+- Sourcing `/opt/ros/<distro>/setup.bash`: ~170ms total (~120ms of actual
+  work).
+- A full `ros2` invocation (argcomplete dispatch or plain `--help`, same
+  cost either way): ~440-500ms -- this is ros2cli's own well-known slow
+  startup (it discovers every installed verb/command extension via
+  Python entry points on *every* invocation), identical to what native
+  `ros2 <TAB>` costs with no Docker involved at all. Not something rosman
+  introduces or can fix.
+- rosman's own Python-side overhead (`import docker_client` -> pulls in
+  the full `docker` package and its own dependency tree of
+  requests/urllib3/etc.): ~150ms, of which importing `docker` alone was
+  ~101ms. This *is* rosman's own cost, and unlike the ros2cli cost, it was
+  pure waste for the completion path -- `find_container`'s job there is
+  just "does this one named container exist and is it running," nothing
+  that actually needs docker-py's object model.
+
+Fixed by making `completion.py` avoid docker-py entirely: a plain `docker
+inspect -f '{{.State.Running}}' <name>` subprocess call replaces
+`ContainerManager.find_container` (the container name comes from
+`naming.container_name`, a pure function of the workspace path -- the
+exact same name `find_container` would have resolved to). Also
+restructured `cli.main` so the `__complete` dispatch path is fully
+separate from the rest of command dispatch, bypassing `argparse`'s
+`args.func(args)` wrapper and its `from docker.errors import
+DockerException` import (which alone re-triggers the same ~101ms cost) --
+`cmd_complete` already catches everything itself, so none of that
+generic machinery was doing anything useful for this path anyway. Every
+other `cmd_*` that legitimately needs docker-py now imports it locally
+inside its own function body instead of at module top level, so this
+doesn't cost those commands anything either.
+
+Net result, measured the same way: ~640ms -> ~550-570ms total per
+completion. The remaining time is essentially all `ros2`'s own CLI
+startup, correctly outside rosman's control -- set this expectation with
+Alec directly rather than overpromising a "fast" result.
