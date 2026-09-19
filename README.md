@@ -16,11 +16,15 @@ WSL2 backend). macOS is out of scope.**
 
 ## Status
 
-Early scaffolding. Phase 1 (config resolver, container lifecycle,
-`ros2`/`colcon` passthrough for a single container) is implemented; the full
-multi-container networking validation (`rosman doctor`'s talker/listener
-round trip) and the Linux/Windows platform extensions (X11, GPU, USB device
-passthrough) are in progress. See [`docs/roadmap.md`](docs/roadmap.md).
+Phases 1-4 of the build order in [`docs/spec.md`](docs/spec.md) are
+implemented: config resolution, container lifecycle with drift detection,
+`ros2`/`colcon` passthrough, CycloneDDS unicast-peer networking (including
+a `rosman doctor --network-check` talker/listener round trip), and Linux
+X11/Windows WSLg GUI passthrough plus usbipd-win device guidance. None of
+the Docker-dependent code paths have been exercised against a live Docker
+daemon yet (this was built in a sandbox without daemon access) — see
+[`docs/roadmap.md`](docs/roadmap.md) for exactly what still needs
+real-world verification before calling it done.
 
 ## Install (development)
 
@@ -40,6 +44,7 @@ rosman colcon build             # forwarded to `colcon build` inside the contain
 rosman shell                   # interactive shell in the container
 rosman status                  # list rosman-managed containers
 rosman doctor                  # environment/config sanity checks
+rosman doctor --network-check  # + a two-container pub/sub round trip over the network group
 rosman down                    # stop the container (rosman up starts it again)
 ```
 

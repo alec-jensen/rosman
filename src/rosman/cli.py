@@ -175,7 +175,7 @@ def cmd_rebuild(args: argparse.Namespace) -> int:
 
 def cmd_doctor(args: argparse.Namespace) -> int:
     config = _load_config_or_exit()
-    checks = run_checks(config)
+    checks = run_checks(config, network_check=args.network_check)
     ok = True
     for check in checks:
         icon = "[green]OK[/green]  " if check.ok else "[red]FAIL[/red]"
@@ -246,6 +246,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_rebuild.set_defaults(func=cmd_rebuild)
 
     p_doctor = subparsers.add_parser("doctor", help="Run environment/config sanity checks")
+    p_doctor.add_argument(
+        "--network-check",
+        action="store_true",
+        help="Also spin up two ephemeral containers and verify a pub/sub round trip "
+        "over the generated CycloneDDS peers (slower; may pull the base ros image)",
+    )
     p_doctor.set_defaults(func=cmd_doctor)
 
     p_shell = subparsers.add_parser("shell", help="Open an interactive shell in the container")

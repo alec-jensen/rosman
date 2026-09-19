@@ -24,14 +24,15 @@ from rosman.docker_client import (
     WORKSPACE_LABEL,
 )
 from rosman.errors import ContainerError
-from rosman.naming import container_name, image_name, volume_name
+from rosman.naming import container_name, image_name, volume_name, workspace_hash
 from rosman.networking import (
     CYCLONEDDS_CONTAINER_PATH,
     RMW_IMPLEMENTATION_ENV,
     ensure_network,
     refresh_peers,
 )
-from rosman.state import RosmanState
+from rosman.platform_support import gui_passthrough
+from rosman.state import RosmanState, state_dir
 
 CONTAINER_WORKSPACE_PATH = "/workspace"
 DEFAULT_USERNAME = "rosman"
@@ -150,7 +151,7 @@ class ContainerManager:
             reasons.append(
                 f"network group changed ({labels.get(NETWORK_GROUP_LABEL)!r} -> {config.network!r})"
             )
-        domain_id = self._resolve_domain_id(config)
+        domain_id = self.resolve_domain_id(config)
         if labels.get(DOMAIN_ID_LABEL) != str(domain_id):
             reasons.append(
                 f"domain_id changed ({labels.get(DOMAIN_ID_LABEL)!r} -> {domain_id!r})"
@@ -159,7 +160,7 @@ class ContainerManager:
 
     # -- domain id -------------------------------------------------------
 
-    def _resolve_domain_id(self, config: RosmanConfig) -> int:
+    def resolve_domain_id(self, config: RosmanConfig) -> int:
         if config.domain_id != "auto":
             return int(config.domain_id)
         return self.state.assign_domain_id(config.workspace_root)
@@ -170,7 +171,7 @@ class ContainerManager:
         uid, gid = host_uid_gid()
         config_hash = compute_config_hash(config, uid, gid)
         image_tag = self.ensure_image(config, config_hash)
-        domain_id = self._resolve_domain_id(config)
+        domain_id = self.resolve_domain_id(config)
         name = container_name(config.workspace_root)
 
         ensure_network(self.client, config.network)
@@ -199,6 +200,12 @@ class ContainerManager:
         device_requests = None
         if config.gpu:
             device_requests = [DeviceRequest(count=-1, capabilities=[["gpu"]])]
+
+        cookie_path = state_dir() / "gui" / workspace_hash(config.workspace_root) / "xauth"
+        gui = gui_passthrough(f"/home/{DEFAULT_USERNAME}", cookie_path)
+        if gui is not None:
+            environment.update(gui.environment)
+            volumes.update(gui.volumes)
 
         labels = {
             MANAGED_LABEL: "true",
@@ -269,6 +276,11 @@ class ContainerManager:
             return False
         container.remove(force=True)
         refresh_peers(self.client, config.network)
+        gui_dir = state_dir() / "gui" / workspace_hash(config.workspace_root)
+        if gui_dir.exists():
+            for f in gui_dir.iterdir():
+                f.unlink()
+            gui_dir.rmdir()
         return True
 
     def rebuild(self, config: RosmanConfig):
