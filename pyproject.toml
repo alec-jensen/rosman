@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rosman"
-version = "0.1.0"
+version = "0.0.0"  # unreleased; 0.0.1 gets tagged once there's a stable working base
 description = "Run ROS 2 anywhere, without installing it natively — a transparent Docker-backed ROS 2 environment manager."
 readme = "README.md"
 requires-python = ">=3.10"

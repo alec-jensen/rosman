@@ -66,11 +66,41 @@ Tracking status against the phased build order in [`spec.md`](spec.md) §10.
   workspace image — that's what `extra_apt_packages` in `rosman.yml` is
   for, since the base `ros:<distro>` image is minimal.
 
+## Phase 6 — image customization for heavier per-project needs — done (needs live verification)
+Not in the original spec; added 2026-09-19 once a real use case (GPU +
+vendor SDK) surfaced the gap. Full rationale in `spec.md`'s addendum.
+
+- `base_image` config field (`rosman/lifecycle.py::_render_ros_install_block`):
+  overrides the default `ros:<distro>` image; rosman adds the ROS 2 apt repo
+  and installs `ros-<distro>-ros-base` onto it, using a small
+  distro→Ubuntu-codename map (`UBUNTU_CODENAME_FOR_DISTRO`).
+- `setup_script` config field: a repo-relative shell script rosman copies
+  into the build context and runs as the rosman user after its own base
+  setup — the escape hatch for anything `extra_apt_packages` can't express
+  (vendor apt repos, `.run` installers, pip installs). Its *content* hash
+  feeds `compute_config_hash`, so editing it triggers a rebuild.
+- `ensure_image` now builds from a real temporary build-context directory
+  (`path=...`) instead of a bare `fileobj` Dockerfile string, since `COPY`
+  needs an actual context to copy the setup script from.
+- Regression-tested: a real `bash` subprocess runs the generated apt-source
+  `echo` command to confirm the produced `sources.list` entry has no stray
+  whitespace (an actual bug caught and fixed during implementation — the
+  first version broke a quoted shell string across Dockerfile continuation
+  lines, embedding literal indentation into the apt source line).
+- Not yet verified against a real Docker build — the Dockerfile-rendering
+  and hashing logic is unit-tested (including running the actual generated
+  shell fragment through bash), but nobody has run `rosman up` with
+  `base_image`/`setup_script` set against a live daemon to confirm the full
+  build succeeds end to end (e.g. an actual ZED SDK install script).
+
 ## Phase 5 — polish — not started
 - Working-directory translation edge cases (symlinked workspaces, devices
   mounted outside `workspace_dir`).
 - Friendlier error messages throughout.
 - Packaging for distribution (pipx-installable release, versioned tags).
+- Versioning: package is currently unreleased (`0.0.0`); `0.0.1` gets
+  tagged once there's a stable working base confirmed against a live
+  Docker daemon.
 
 ## Explicitly deferred (see spec §9)
 - macOS.

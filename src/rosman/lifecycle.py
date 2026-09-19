@@ -6,9 +6,11 @@ per-workspace image with a host-UID-matched user baked in.
 from __future__ import annotations
 
 import hashlib
-import io
 import os
+import shutil
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 
 import docker
 from docker.errors import BuildError, ImageNotFound, NotFound
@@ -21,6 +23,7 @@ from rosman.docker_client import (
     DOMAIN_ID_LABEL,
     MANAGED_LABEL,
     NETWORK_GROUP_LABEL,
+    RESTART_POLICY_LABEL,
     WORKSPACE_LABEL,
 )
 from rosman.errors import ContainerError
@@ -36,6 +39,26 @@ from rosman.state import RosmanState, state_dir
 
 CONTAINER_WORKSPACE_PATH = "/workspace"
 DEFAULT_USERNAME = "rosman"
+SETUP_SCRIPT_CONTAINER_NAME = "rosman-setup.sh"
+
+# Ubuntu codename ROS 2 apt packages are published under for each distro, used
+# only when `base_image` overrides the default `ros:<distro>` image and rosman
+# has to apt-install ROS 2 onto an arbitrary base itself (spec extension:
+# some projects need a base other than the stock ros image -- e.g. an
+# nvidia/cuda image for GPU-heavy stacks like the ZED SDK -- so `base_image`
+# lets a project pick its own base and rosman still wires ROS 2 on top).
+# This mapping is a fixed historical fact per distro except for `rolling`,
+# which tracks whatever Ubuntu release is current for it and may need
+# updating over time.
+UBUNTU_CODENAME_FOR_DISTRO = {
+    "foxy": "focal",
+    "galactic": "focal",
+    "humble": "jammy",
+    "iron": "jammy",
+    "jazzy": "noble",
+    "kilted": "noble",
+    "rolling": "noble",
+}
 
 
 def host_uid_gid() -> tuple[int, int]:
@@ -45,6 +68,19 @@ def host_uid_gid() -> tuple[int, int]:
     # conventional first-user id. rosman's supported Windows path runs
     # through WSL2, where os.getuid() is always available.
     return 1000, 1000
+
+
+def _setup_script_digest(config: RosmanConfig) -> str:
+    """Hash of the setup script's *contents*, not just its path, so editing
+    the script (e.g. bumping a ZED SDK installer version) is picked up as
+    config drift and triggers a rebuild -- not just renaming/removing it."""
+    if not config.setup_script:
+        return ""
+    script_path = (config.project_root / config.setup_script).resolve()
+    try:
+        return hashlib.sha256(script_path.read_bytes()).hexdigest()
+    except OSError:
+        return f"MISSING:{config.setup_script}"
 
 
 def compute_config_hash(config: RosmanConfig, uid: int, gid: int) -> str:
@@ -59,32 +95,88 @@ def compute_config_hash(config: RosmanConfig, uid: int, gid: int) -> str:
             ",".join(sorted(config.extra_apt_packages)),
             str(uid),
             str(gid),
+            config.base_image or "",
+            config.setup_script or "",
+            _setup_script_digest(config),
         ]
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
 
+def _render_ros_install_block(config: RosmanConfig) -> str:
+    """Only needed when `base_image` overrides the default `ros:<distro>`
+    image: that image already has ROS 2 installed, but an arbitrary base
+    (e.g. `nvidia/cuda:...`) doesn't, so rosman adds the ROS 2 apt repo and
+    installs ros-base itself, matching the official install instructions."""
+    if not config.base_image:
+        return ""
+    codename = UBUNTU_CODENAME_FOR_DISTRO.get(config.ros_distro)
+    if codename is None:
+        raise ContainerError(
+            f"Don't know the Ubuntu codename to install ros_distro '{config.ros_distro}' "
+            "onto a custom base_image. Known distros: "
+            f"{', '.join(sorted(UBUNTU_CODENAME_FOR_DISTRO))}."
+        )
+    # The sources.list line is built from separate quoted `echo` arguments
+    # (echo joins them with single spaces) rather than one string broken
+    # across continuation lines -- breaking a *quoted* string across
+    # Dockerfile continuation lines leaves the continuation lines' leading
+    # whitespace embedded literally in the value, corrupting the apt entry.
+    return f"""
+# base_image override: install ROS 2 {config.ros_distro} onto {config.base_image}
+RUN apt-get update \\
+    && apt-get install -y --no-install-recommends curl gnupg lsb-release ca-certificates \\
+    && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \\
+        -o /usr/share/keyrings/ros-archive-keyring.gpg \\
+    && echo "deb [arch=$(dpkg --print-architecture)" \\
+        "signed-by=/usr/share/keyrings/ros-archive-keyring.gpg]" \\
+        "http://packages.ros.org/ros2/ubuntu {codename} main" \\
+        > /etc/apt/sources.list.d/ros2.list \\
+    && apt-get update \\
+    && apt-get install -y --no-install-recommends ros-{config.ros_distro}-ros-base \\
+    && rm -rf /var/lib/apt/lists/*
+"""
+
+
 def render_dockerfile(config: RosmanConfig, uid: int, gid: int) -> str:
+    base = config.base_image or f"ros:{config.ros_distro}"
     extra_packages = " ".join(config.extra_apt_packages)
     install_extra = f" {extra_packages}" if extra_packages else ""
-    return f"""FROM ros:{config.ros_distro}
+    ros_install_block = _render_ros_install_block(config)
+
+    setup_block = ""
+    if config.setup_script:
+        # Run as the rosman user, not root: installers that write into the
+        # user's home (SDK licenses/caches, pip --user, etc.) need HOME set
+        # correctly, matching how the container actually runs at `rosman up`.
+        setup_block = f"""
+COPY {SETUP_SCRIPT_CONTAINER_NAME} /tmp/{SETUP_SCRIPT_CONTAINER_NAME}
+RUN chmod +x /tmp/{SETUP_SCRIPT_CONTAINER_NAME}
+USER $USERNAME
+RUN /tmp/{SETUP_SCRIPT_CONTAINER_NAME}
+USER root
+RUN rm /tmp/{SETUP_SCRIPT_CONTAINER_NAME}
+"""
+
+    return f"""FROM {base}
 ARG USERNAME={DEFAULT_USERNAME}
 ARG USER_UID={uid}
 ARG USER_GID={gid}
-
+{ros_install_block}
 RUN (getent group $USER_GID || groupadd --gid $USER_GID $USERNAME) \\
     && (getent passwd $USER_UID || \\
         useradd --uid $USER_UID --gid $USER_GID -m -s /bin/bash $USERNAME) \\
     && apt-get update \\
     && apt-get install -y --no-install-recommends \\
-        sudo ros-{config.ros_distro}-rmw-cyclonedds-cpp{install_extra} \\
+        sudo python3-colcon-common-extensions \\
+        ros-{config.ros_distro}-rmw-cyclonedds-cpp{install_extra} \\
     && echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME \\
     && chmod 0440 /etc/sudoers.d/$USERNAME \\
     && rm -rf /var/lib/apt/lists/*
 
 ENV RMW_IMPLEMENTATION={RMW_IMPLEMENTATION_ENV}
 ENV RCUTILS_COLORIZED_OUTPUT=1
-
+{setup_block}
 WORKDIR {CONTAINER_WORKSPACE_PATH}
 """
 
@@ -111,15 +203,30 @@ class ContainerManager:
         except ImageNotFound:
             pass
 
+        setup_script_source = None
+        if config.setup_script:
+            setup_script_source = (config.project_root / config.setup_script).resolve()
+            if not setup_script_source.is_file():
+                raise ContainerError(
+                    f"setup_script '{config.setup_script}' (resolved to "
+                    f"{setup_script_source}) does not exist."
+                )
+
         dockerfile = render_dockerfile(config, uid, gid)
-        fileobj = io.BytesIO(dockerfile.encode("utf-8"))
-        try:
-            self.client.images.build(fileobj=fileobj, tag=tag, rm=True)
-        except BuildError as exc:
-            raise ContainerError(
-                f"Failed to build image for ros_distro '{config.ros_distro}': {exc}\n"
-                f"Check that 'ros:{config.ros_distro}' is a valid tag on Docker Hub."
-            ) from exc
+        with tempfile.TemporaryDirectory(prefix="rosman-build-") as build_dir_str:
+            build_dir = Path(build_dir_str)
+            (build_dir / "Dockerfile").write_text(dockerfile)
+            if setup_script_source is not None:
+                shutil.copy(setup_script_source, build_dir / SETUP_SCRIPT_CONTAINER_NAME)
+            try:
+                self.client.images.build(path=str(build_dir), tag=tag, rm=True)
+            except BuildError as exc:
+                base = config.base_image or f"ros:{config.ros_distro}"
+                raise ContainerError(
+                    f"Failed to build image for ros_distro '{config.ros_distro}': {exc}\n"
+                    f"Check that '{base}' is a valid image and, if set, that "
+                    f"setup_script '{config.setup_script}' runs cleanly."
+                ) from exc
         return tag
 
     # -- lookup ------------------------------------------------------------
@@ -146,7 +253,10 @@ class ContainerManager:
                 f"ros_distro changed ({labels.get(DISTRO_LABEL)!r} -> {config.ros_distro!r})"
             )
         if labels.get(CONFIG_HASH_LABEL) != expected_hash:
-            reasons.append("image config changed (distro, rmw, or extra_apt_packages)")
+            reasons.append(
+                "image config changed (distro, rmw, extra_apt_packages, base_image, "
+                "or setup_script)"
+            )
         if labels.get(NETWORK_GROUP_LABEL) != config.network:
             reasons.append(
                 f"network group changed ({labels.get(NETWORK_GROUP_LABEL)!r} -> {config.network!r})"
@@ -155,6 +265,11 @@ class ContainerManager:
         if labels.get(DOMAIN_ID_LABEL) != str(domain_id):
             reasons.append(
                 f"domain_id changed ({labels.get(DOMAIN_ID_LABEL)!r} -> {domain_id!r})"
+            )
+        if labels.get(RESTART_POLICY_LABEL) != config.restart_policy:
+            reasons.append(
+                f"restart_policy changed ({labels.get(RESTART_POLICY_LABEL)!r} -> "
+                f"{config.restart_policy!r})"
             )
         return DriftReport(drifted=bool(reasons), reasons=reasons)
 
@@ -214,6 +329,7 @@ class ContainerManager:
             CONFIG_HASH_LABEL: config_hash,
             NETWORK_GROUP_LABEL: config.network,
             DOMAIN_ID_LABEL: str(domain_id),
+            RESTART_POLICY_LABEL: config.restart_policy,
         }
 
         container = self.client.containers.create(
@@ -227,6 +343,7 @@ class ContainerManager:
             environment=environment,
             devices=devices,
             device_requests=device_requests,
+            restart_policy={"Name": config.restart_policy},
             labels=labels,
             working_dir=CONTAINER_WORKSPACE_PATH,
             user=f"{uid}:{gid}",

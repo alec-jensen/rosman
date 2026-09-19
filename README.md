@@ -64,7 +64,39 @@ gpu: false                    # true enables nvidia-container-toolkit passthroug
 devices: []                   # e.g. ["/dev/ttyUSB0"]
 workspace_dir: .              # path (relative to this file) mounted as the container's workspace root
 extra_apt_packages: []        # optional list, installed into the image on first build
+restart_policy: "no"          # docker restart policy: "no" (default), "unless-stopped", "always", "on-failure"
+base_image: null              # optional -- override the default `ros:<distro>` base image
+setup_script: null            # optional -- path to a shell script rosman runs during the image build
 ```
+
+### Custom base images and setup scripts
+
+Projects with heavier requirements — CUDA, a vendor SDK, anything that
+isn't a plain `apt install` — can override the base image and/or supply an
+arbitrary setup script that runs during the image build. Both are optional;
+most projects need neither. Example, for a GPU project using the ZED SDK:
+
+```yaml
+ros_distro: humble
+base_image: nvidia/cuda:12.4.1-devel-ubuntu22.04   # rosman installs ROS 2 onto this itself
+gpu: true                                            # nvidia-container-toolkit passthrough
+devices: ["/dev/video0"]                             # the camera
+setup_script: docker/install_zed_sdk.sh              # anything apt can't express: repos, .run installers, etc.
+```
+
+- `base_image`: when set, rosman adds the official ROS 2 apt repo and
+  installs `ros-<distro>-ros-base` onto it (instead of using the upstream
+  `ros:<distro>` image, which already has ROS 2 built in). Useful when you
+  need a base other than the stock ROS image — e.g. an `nvidia/cuda` image
+  so GPU library versions are pinned exactly, rather than layering CUDA on
+  top of `ros:<distro>` after the fact.
+- `setup_script`: a path (relative to `rosman.yml`, must stay inside the
+  project) to a shell script rosman copies into the build context and runs,
+  as the rosman user, after the base ROS 2 + cyclonedds setup. This is the
+  escape hatch for anything `extra_apt_packages` can't express — adding a
+  vendor's apt repo, running a `.run` installer, `pip install`, etc. Editing
+  the script's contents is picked up as config drift (via a hash of the
+  file, not just its path) and triggers an image rebuild on `rosman up`.
 
 ## Design decisions
 
@@ -80,6 +112,22 @@ extra_apt_packages: []        # optional list, installed into the image on first
 
 See [`docs/spec.md`](docs/spec.md) for the full design spec this project is
 built from.
+
+## Known limitations
+
+- **macOS is not supported** and won't be — Linux (Docker Engine) and
+  Windows (Docker Desktop/WSL2) only.
+- **No shell tab-completion** through the container for `ros2`/`colcon`
+  passthrough calls; native `ros2`'s argcomplete-based completion doesn't
+  work through the `docker exec` boundary.
+- **No multi-host DDS discovery.** rosman targets multiple containers on
+  one dev machine. Talking to a real robot over a network/the internet
+  would need something like a VPN mesh (e.g. Husarnet) layered on top —
+  out of scope here.
+- **ROS 2 only** — no ROS 1 distros.
+- rosman wires up GPU/X11 *plumbing* (device passthrough, DISPLAY/XAuth),
+  but doesn't install GUI packages (rviz2, rqt, Gazebo) into the
+  per-workspace image — add them via `extra_apt_packages`.
 
 ## Development
 

@@ -34,6 +34,13 @@ KNOWN_ROS_DISTROS = {
 
 SUPPORTED_RMW_IMPLEMENTATIONS = {"cyclonedds"}
 
+# Docker restart policies rosman will accept. Spec §6 explicitly warns against
+# defaulting to "unless-stopped" (WSL2/Docker Desktop can restart sessions
+# independently of the user), so the default stays "no" -- an explicit
+# `rosman up` is always required after a host reboot unless a project opts
+# into something else here.
+RESTART_POLICIES = {"no", "unless-stopped", "always", "on-failure"}
+
 REQUIRED_FIELDS = ("ros_distro",)
 
 _DEFAULTS: dict[str, Any] = {
@@ -44,6 +51,9 @@ _DEFAULTS: dict[str, Any] = {
     "devices": [],
     "workspace_dir": ".",
     "extra_apt_packages": [],
+    "restart_policy": "no",
+    "base_image": None,
+    "setup_script": None,
 }
 
 
@@ -59,6 +69,9 @@ class RosmanConfig:
     devices: list[str] = field(default_factory=list)
     workspace_dir: str = "."
     extra_apt_packages: list[str] = field(default_factory=list)
+    restart_policy: str = "no"
+    base_image: str | None = None
+    setup_script: str | None = None
 
     # Not part of the YAML schema — filled in by the loader.
     config_path: Path = field(default=None, repr=False)  # type: ignore[assignment]
@@ -123,6 +136,30 @@ def _validate_domain_id(value: Any, path: Path) -> int | str:
     return value
 
 
+def _validate_base_image(value: Any, path: Path) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise ConfigError(
+            f"{path}: 'base_image' must be a non-empty image reference string "
+            "(e.g. \"nvidia/cuda:12.4.1-devel-ubuntu22.04\"), or omitted entirely."
+        )
+    return value
+
+
+def _validate_setup_script(value: Any, path: Path) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise ConfigError(f"{path}: 'setup_script' must be a non-empty relative path string.")
+    if Path(value).is_absolute() or ".." in Path(value).parts:
+        raise ConfigError(
+            f"{path}: 'setup_script' must be a path relative to this file, inside the "
+            f"project (got {value!r})."
+        )
+    return value
+
+
 def parse_config(text: str, path: Path) -> RosmanConfig:
     """Parse and validate already-read YAML text into a RosmanConfig.
 
@@ -183,6 +220,13 @@ def parse_config(text: str, path: Path) -> RosmanConfig:
     if not isinstance(gpu, bool):
         raise ConfigError(f"{path}: 'gpu' must be true or false.")
 
+    restart_policy = data.get("restart_policy", _DEFAULTS["restart_policy"])
+    if restart_policy not in RESTART_POLICIES:
+        raise ConfigError(
+            f"{path}: 'restart_policy' must be one of: {', '.join(sorted(RESTART_POLICIES))} "
+            f"(got {restart_policy!r})."
+        )
+
     return RosmanConfig(
         ros_distro=ros_distro,
         rmw_implementation=rmw,
@@ -193,6 +237,11 @@ def parse_config(text: str, path: Path) -> RosmanConfig:
         workspace_dir=workspace_dir,
         extra_apt_packages=_validate_apt_packages(
             data.get("extra_apt_packages", list(_DEFAULTS["extra_apt_packages"])), path
+        ),
+        restart_policy=restart_policy,
+        base_image=_validate_base_image(data.get("base_image", _DEFAULTS["base_image"]), path),
+        setup_script=_validate_setup_script(
+            data.get("setup_script", _DEFAULTS["setup_script"]), path
         ),
         config_path=path,
     )

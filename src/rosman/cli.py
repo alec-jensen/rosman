@@ -36,6 +36,8 @@ gpu: false                    # true enables nvidia-container-toolkit passthroug
 devices: []                   # e.g. ["/dev/ttyUSB0"]
 workspace_dir: .              # path (relative to this file) mounted as the container workspace root
 extra_apt_packages: []        # optional list, installed into the image on first build
+restart_policy: "no"          # docker restart policy; "no" (default) requires explicit `rosman up`
+                               # after a host reboot -- see docs/spec.md #6 for why
 """
 
 

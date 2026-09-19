@@ -18,6 +18,7 @@ DISTRO_LABEL = "rosman.distro"
 CONFIG_HASH_LABEL = "rosman.config_hash"
 NETWORK_GROUP_LABEL = "rosman.network_group"
 DOMAIN_ID_LABEL = "rosman.domain_id"
+RESTART_POLICY_LABEL = "rosman.restart_policy"
 
 
 def get_client() -> docker.DockerClient:

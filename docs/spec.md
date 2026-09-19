@@ -244,3 +244,44 @@ one monolithic script:
   used across many unrelated rosman projects on one machine — simplest
   approach is a local state file tracking assigned IDs per project path;
   confirm this is sufficient before building anything fancier.
+
+---
+
+## Addendum (2026-09-19): image customization for heavier per-project needs
+
+Everything above is the original spec, kept verbatim as the historical
+record. This addendum captures a real gap surfaced once the project's own
+use case came up: some projects need much more than `extra_apt_packages`
+can express — GPU-heavy stacks (CUDA pinned to a specific base image) and
+vendor SDKs with their own installers (e.g. the ZED SDK), not just plain
+`apt install <name>` packages.
+
+Two config fields close this gap, both optional (most projects need
+neither):
+
+- **`base_image`** — override the default `ros:<distro>` image. When set,
+  rosman adds the official ROS 2 apt repo and apt-installs
+  `ros-<distro>-ros-base` onto it, the same way it would if you followed
+  ROS's own "install on a bare Ubuntu box" instructions. This is for cases
+  like starting from `nvidia/cuda:<tag>-devel-ubuntu22.04` so CUDA/cuDNN
+  versions are exactly what the base image pins, rather than whatever ends
+  up layered on top of `ros:<distro>` after the fact. Doing this correctly
+  requires knowing which Ubuntu codename each ROS 2 distro's apt packages
+  are published under (humble→jammy, jazzy→noble, etc.) — a small, mostly
+  fixed mapping, except `rolling`, which tracks whatever codename is
+  currently current and may need updating over time.
+- **`setup_script`** — a path (relative to `rosman.yml`, must resolve
+  inside the project) to a shell script rosman copies into the image build
+  context and runs, as the rosman user, after its own base setup. This is
+  the general escape hatch: adding a vendor apt repo, running a `.run`
+  installer, `pip install`, anything `extra_apt_packages`'s flat
+  package-name list can't express. The script's *contents* (not just its
+  path) feed into the same config-hash that already drives image tagging
+  and drift detection, so editing it triggers a rebuild on the next
+  `rosman up`, the same as changing `ros_distro` would.
+
+Neither field changes the three load-bearing decisions in §2 — one
+persistent container, bridge network + CycloneDDS, thin ros2/colcon
+passthrough — they only extend *how the image gets built*, which was
+already the part of the config schema explicitly designed to be extended
+(`extra_apt_packages` was the same kind of knob, just narrower).

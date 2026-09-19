@@ -18,6 +18,7 @@ def test_parse_minimal_config_applies_defaults(tmp_path: Path):
     assert config.devices == []
     assert config.workspace_dir == "."
     assert config.extra_apt_packages == []
+    assert config.restart_policy == "no"
     assert config.config_path == path
 
 
@@ -32,6 +33,7 @@ gpu: true
 devices: ["/dev/ttyUSB0"]
 workspace_dir: ros_ws
 extra_apt_packages: ["ros-jazzy-nav2-bringup"]
+restart_policy: unless-stopped
 """
     config = parse_config(text, path)
     assert config.ros_distro == "jazzy"
@@ -41,7 +43,51 @@ extra_apt_packages: ["ros-jazzy-nav2-bringup"]
     assert config.devices == ["/dev/ttyUSB0"]
     assert config.workspace_dir == "ros_ws"
     assert config.extra_apt_packages == ["ros-jazzy-nav2-bringup"]
+    assert config.restart_policy == "unless-stopped"
     assert config.workspace_root == (path.parent / "ros_ws").resolve()
+
+
+def test_invalid_restart_policy(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    with pytest.raises(ConfigError, match="restart_policy"):
+        parse_config("ros_distro: humble\nrestart_policy: always-and-forever\n", path)
+
+
+def test_base_image_and_setup_script_default_to_none(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    config = parse_config(MINIMAL, path)
+    assert config.base_image is None
+    assert config.setup_script is None
+
+
+def test_base_image_and_setup_script_parse(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    text = (
+        "ros_distro: humble\n"
+        "base_image: nvidia/cuda:12.4.1-devel-ubuntu22.04\n"
+        "setup_script: docker/install_zed_sdk.sh\n"
+    )
+    config = parse_config(text, path)
+    assert config.base_image == "nvidia/cuda:12.4.1-devel-ubuntu22.04"
+    assert config.setup_script == "docker/install_zed_sdk.sh"
+
+
+def test_empty_base_image_is_rejected(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    with pytest.raises(ConfigError, match="base_image"):
+        parse_config('ros_distro: humble\nbase_image: ""\n', path)
+
+
+def test_setup_script_rejects_absolute_path(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    with pytest.raises(ConfigError, match="setup_script"):
+        parse_config("ros_distro: humble\nsetup_script: /etc/passwd\n", path)
+
+
+def test_setup_script_rejects_parent_traversal(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    with pytest.raises(ConfigError, match="setup_script"):
+        parse_config("ros_distro: humble\nsetup_script: ../../etc/passwd\n", path)
 
 
 def test_missing_required_field(tmp_path: Path):
