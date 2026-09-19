@@ -492,6 +492,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../guides/rosdep-lockfile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building from source (rosdep + lock)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../guides/team-images/" class="md-nav__link">
         
   
@@ -803,9 +831,12 @@ rosman<span class="w"> </span>rebuild<span class="w"> </span><span class="c1"># 
 </code></pre></div>
 <p>Anything that isn't one of rosman's own subcommands (<code>init</code>, <code>up</code>, <code>down</code>,
 <code>status</code>, <code>rebuild</code>, <code>doctor</code>, <code>shell</code>, <code>push</code>, <code>completion</code>, <code>help</code>) is
-forwarded verbatim as <code>ros2 &lt;args&gt;</code> (or <code>colcon &lt;args&gt;</code> if the first word
-is <code>colcon</code>) inside the workspace container — rosman does not reimplement
-the <code>ros2</code> CLI.</p>
+forwarded verbatim as <code>ros2 &lt;args&gt;</code> (or <code>colcon &lt;args&gt;</code>/<code>rosdep &lt;args&gt;</code> if
+the first word is <code>colcon</code>/<code>rosdep</code>) inside the workspace container —
+rosman does not reimplement the <code>ros2</code> CLI. Cloning source packages into
+<code>src/</code>? See <a href="../guides/rosdep-lockfile/">Building from source</a> for
+<code>rosman rosdep install</code> before you hit a missing-dependency error at
+runtime.</p>
 <p>Next: turn on <a href="../guides/tab-completion/">tab-completion</a>, skim the
 <a href="../configuration/">configuration reference</a>, or jump straight to
 <a href="../examples/">examples</a> for a setup close to yours.</p>

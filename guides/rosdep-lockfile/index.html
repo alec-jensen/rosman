@@ -10,29 +10,31 @@
       
       
       
-        <link rel="canonical" href="https://alec-jensen.github.io/rosman/troubleshooting/">
+        <link rel="canonical" href="https://alec-jensen.github.io/rosman/guides/rosdep-lockfile/">
       
       
-        <link rel="prev" href="../examples/">
+        <link rel="prev" href="../custom-images/">
       
+      
+        <link rel="next" href="../team-images/">
       
       
         
       
       
-      <link rel="icon" href="../assets/images/favicon.png">
+      <link rel="icon" href="../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
-        <title>Troubleshooting - rosman</title>
+        <title>Building from source (rosdep + lock) - rosman</title>
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -51,7 +53,7 @@
       
     
     
-    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -76,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#troubleshooting" class="md-skip">
+        <a href="#building-packages-from-source-rosdep-rosmanlock" class="md-skip">
           Skip to content
         </a>
       
@@ -92,7 +94,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href=".." title="rosman" class="md-header__button md-logo" aria-label="rosman" data-md-component="logo">
+    <a href="../.." title="rosman" class="md-header__button md-logo" aria-label="rosman" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -112,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Troubleshooting
+              Building from source (rosdep + lock)
             
           </span>
         </div>
@@ -230,7 +232,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href=".." title="rosman" class="md-nav__button md-logo" aria-label="rosman" data-md-component="logo">
+    <a href="../.." title="rosman" class="md-nav__button md-logo" aria-label="rosman" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -260,7 +262,7 @@
   
   
     <li class="md-nav__item">
-      <a href=".." class="md-nav__link">
+      <a href="../.." class="md-nav__link">
         
   
   
@@ -287,7 +289,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../getting-started/" class="md-nav__link">
+      <a href="../../getting-started/" class="md-nav__link">
         
   
   
@@ -314,7 +316,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../configuration/" class="md-nav__link">
+      <a href="../../configuration/" class="md-nav__link">
         
   
   
@@ -338,8 +340,10 @@
       
   
   
+    
   
   
+  
     
     
     
@@ -350,11 +354,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
         
           
           <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
@@ -375,7 +379,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             
@@ -393,7 +397,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../guides/custom-images/" class="md-nav__link">
+      <a href="../custom-images/" class="md-nav__link">
         
   
   
@@ -418,10 +422,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../guides/rosdep-lockfile/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building from source (rosdep + lock)
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -437,6 +468,59 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-a-lockfile-not-just-running-rosdep-install-yourself" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why a lockfile, not just running rosdep install yourself
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ros_distro-must-match" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ros_distro must match
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -449,7 +533,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../guides/team-images/" class="md-nav__link">
+      <a href="../team-images/" class="md-nav__link">
         
   
   
@@ -477,7 +561,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../guides/multi-host/" class="md-nav__link">
+      <a href="../multi-host/" class="md-nav__link">
         
   
   
@@ -505,7 +589,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../guides/tab-completion/" class="md-nav__link">
+      <a href="../tab-completion/" class="md-nav__link">
         
   
   
@@ -533,7 +617,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../guides/gpu-gui-devices/" class="md-nav__link">
+      <a href="../gpu-gui-devices/" class="md-nav__link">
         
   
   
@@ -568,7 +652,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../examples/" class="md-nav__link">
+      <a href="../../examples/" class="md-nav__link">
         
   
   
@@ -592,37 +676,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Troubleshooting
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/" class="md-nav__link">
         
   
   
@@ -638,48 +695,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#common-issues" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Common issues
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#still-stuck" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Still stuck?
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -711,10 +726,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#common-issues" class="md-nav__link">
+  <a href="#why-a-lockfile-not-just-running-rosdep-install-yourself" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Common issues
+        Why a lockfile, not just running rosdep install yourself
       
     </span>
   </a>
@@ -722,10 +737,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#still-stuck" class="md-nav__link">
+  <a href="#ros_distro-must-match" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Still stuck?
+        ros_distro must match
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitations
       
     </span>
   </a>
@@ -752,82 +778,56 @@
   
 
 
-<h1 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h1>
-<p>Start here:</p>
-<div class="highlight"><pre><span></span><code>rosman<span class="w"> </span>doctor
+<h1 id="building-packages-from-source-rosdep-rosmanlock">Building packages from source: rosdep + rosman.lock<a class="headerlink" href="#building-packages-from-source-rosdep-rosmanlock" title="Permanent link">&para;</a></h1>
+<p>Cloning real ROS 2 source packages into your workspace's <code>src/</code> often
+pulls in apt dependencies that aren't part of the default image —
+<code>colcon build</code> can succeed while the package still fails at runtime with
+a <code>ModuleNotFoundError</code> for a message/service package it depends on.</p>
+<div class="highlight"><pre><span></span><code>rosman<span class="w"> </span>rosdep<span class="w"> </span>install
 </code></pre></div>
-<p>It checks Docker reachability, config validity, container drift, declared
-GPU/devices, and (with <code>--network-check</code>) actually spins up two ephemeral
-containers to verify a pub/sub round trip over the network — the most
-reliable way to confirm networking actually works end to end, not just
-that the config looks right.</p>
-<h2 id="common-issues">Common issues<a class="headerlink" href="#common-issues" title="Permanent link">&para;</a></h2>
-<p><strong>A <code>docker.errors.DockerException</code> / "docker daemon" check fails.</strong>
-Docker itself isn't reachable — make sure Docker Engine (Linux) or Docker
-Desktop (Windows) is running, and that your user has permission to talk to
-it (on Linux, being in the <code>docker</code> group; a fresh group membership needs
-a new login session to take effect, not just a new terminal).</p>
-<p><strong>A build hangs for a long time with no error, using a custom
-<code>base_image</code>.</strong> A bare (non-ROS) base image doesn't set
-<code>DEBIAN_FRONTEND=noninteractive</code> on its own, and an interactive <code>tzdata</code>
-(or similar) prompt during <code>apt-get install</code> will hang the build
-indefinitely rather than fail — there's nothing to answer the prompt in a
-non-interactive build. See <a href="../guides/custom-images/">Custom base images</a>.</p>
-<p><strong><code>rosman doctor</code> reports config drift.</strong> Something in <code>rosman.yml</code>
-(distro, network, <code>base_image</code>/<code>setup_script</code> content, restart policy, or
-the resolved domain id) changed since the container was created. Run
-<code>rosman rebuild</code> to recreate it with the new config — your <code>build</code>/
-<code>install</code>/<code>log</code> volumes are preserved.</p>
-<p><strong>Files created in the container come out owned by the wrong user on the
-host.</strong> This shouldn't happen under normal use — rosman applies your
-actual host UID/GID at container start specifically so bind-mounted files
-come out correctly owned. If you're hitting this, check for a stale
-container from before a <code>rosman rebuild</code>/<code>rosman down --remove</code>, or open
-an issue.</p>
-<p><strong>A <code>colcon build</code> fails only for the very first build after
-<code>registry_image</code>/<code>base_image</code> changed.</strong> Try <code>rosman rebuild</code> — the
-<code>build</code>/<code>install</code>/<code>log</code> directories are named Docker volumes tied to the
-distro, and a fresh one starts out root-owned until the first UID-matched
-process touches it; this is handled automatically on a normal <code>rosman up</code>,
-but a manual <code>docker</code> interaction with the same volume outside of rosman
-can leave it in a state rosman doesn't expect.</p>
-<p><strong><code>colcon build</code> succeeds for a package cloned into <code>src/</code>, but running it
-fails with a <code>ModuleNotFoundError</code> for another ROS package.</strong> The package
-declares a dependency that isn't part of the default image — <code>colcon
-build</code> doesn't fail just because a pure-Python runtime import will later
-be missing. Run <code>rosman rosdep install</code> to resolve and install it (and
-lock it into <code>rosman.yml</code>'s built image via <code>rosman rebuild</code>) — see
-<a href="../guides/rosdep-lockfile/">Building from source</a>.</p>
-<p><strong><code>ros2 topic list</code>/GUI apps don't show anything from another rosman
-project.</strong> Confirm both projects use the same <code>network:</code> group in their
-<code>rosman.yml</code> — only projects in the same group can discover each other.
-Run <code>rosman doctor --network-check</code> to verify the underlying DDS discovery
-mechanism itself works (it spins up two throwaway containers and confirms
-one actually receives what the other publishes).</p>
-<p><strong>A GUI window (rviz2, rqt, ...) doesn't appear.</strong> Make sure the package
-providing it is actually installed (<code>extra_apt_packages</code>) — rosman wires
-up the X11/WSLg plumbing but doesn't install GUI packages itself. See
-<a href="../guides/gpu-gui-devices/">GPU, GUIs &amp; devices</a>.</p>
-<p><strong>A device in <code>devices:</code> isn't visible inside the container, on
-Windows.</strong> WSL2 doesn't expose host USB devices by default. <code>rosman
-doctor</code> detects this and prints the exact <code>usbipd bind</code>/<code>usbipd attach</code>
-commands (with the device's BUSID from a live <code>usbipd list</code>) to fix it.</p>
-<p><strong>Multi-host discovery isn't working.</strong> Almost always either mismatched
-<code>domain_id</code> (must be identical, explicit, on every machine — see
-<a href="../guides/multi-host/">Multi-host</a>) or a firewall blocking the UDP port
-range <code>rosman doctor</code> reports. Confirm same-host discovery works first
-with <code>rosman doctor --network-check</code> before troubleshooting the
-cross-machine case.</p>
-<p><strong>Nothing happens for a while on the very first command in a new
-workspace, with no output.</strong> This was a real bug, since fixed: the
-"Starting rosman container..." message now prints <em>before</em> the (possibly
-slow) first build, not after, and build/pull/push all show live progress.
-If you're seeing this on a current version, please open an issue — it
-means something regressed.</p>
-<h2 id="still-stuck">Still stuck?<a class="headerlink" href="#still-stuck" title="Permanent link">&para;</a></h2>
-<p>Open an issue at
-<a href="https://github.com/alec-jensen/rosman/issues">github.com/alec-jensen/rosman/issues</a>
-with your <code>rosman.yml</code> and the output of <code>rosman doctor</code>.</p>
+<p>resolves those dependencies from your <code>src/</code> packages' <code>package.xml</code>
+files, installs them into the running container <em>immediately</em> (no rebuild
+wait — you can use them right away), and writes the result to
+<code>rosman.lock</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># rosman.lock -- generated, check it into git, don't hand-edit</span>
+<span class="nt">ros_distro</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">humble</span>
+<span class="nt">apt_packages</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ros-humble-example-interfaces</span>
+</code></pre></div>
+<p>Run <code>rosman rebuild</code> afterward to bake those packages into the image
+itself — <code>rosman.lock</code> is folded into the build the same way
+<code>extra_apt_packages</code> is, so it survives rebuilds and is shared with your
+team once you check it into git.</p>
+<p>Any other <code>rosdep</code> subcommand (<code>update</code>, <code>check</code>, <code>keys</code>, ...) is plain
+passthrough, exactly like <code>colcon</code>:</p>
+<div class="highlight"><pre><span></span><code>rosman<span class="w"> </span>rosdep<span class="w"> </span>update
+rosman<span class="w"> </span>rosdep<span class="w"> </span>check<span class="w"> </span>--from-paths<span class="w"> </span>src<span class="w"> </span>--ignore-src
+</code></pre></div>
+<h2 id="why-a-lockfile-not-just-running-rosdep-install-yourself">Why a lockfile, not just running <code>rosdep install</code> yourself<a class="headerlink" href="#why-a-lockfile-not-just-running-rosdep-install-yourself" title="Permanent link">&para;</a></h2>
+<p>You could just <code>rosman shell</code> and run <code>rosdep install</code> directly — but that
+change only exists in your one running container. It's invisible to
+rosman's config-drift detection, and gets silently lost the next time
+anyone (including you, later) runs <code>rosman rebuild</code> or a teammate builds
+the image fresh. <code>rosman.lock</code> makes the resolved dependency set part of
+the same config-as-code model <code>extra_apt_packages</code>/<code>base_image</code>/
+<code>setup_script</code> already use — reproducible and shared via git, not a
+one-off manual step.</p>
+<h2 id="ros_distro-must-match"><code>ros_distro</code> must match<a class="headerlink" href="#ros_distro-must-match" title="Permanent link">&para;</a></h2>
+<p><code>rosman.lock</code> records the <code>ros_distro</code> it was resolved for (apt package
+names are distro-suffixed, e.g. <code>ros-humble-example-interfaces</code>), and
+<code>rosman</code> refuses to load a config where that doesn't match the current
+<code>rosman.yml</code> — regenerate it with <code>rosman rosdep install</code> after changing
+<code>ros_distro</code>, or delete it if it's stale.</p>
+<h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Locks the resolved apt <strong>package set</strong>, not exact versions — apt
+  doesn't support the same exact-version pinning language-level lockfiles
+  (<code>uv.lock</code>, <code>Cargo.lock</code>) do. Reproducible across your team on the same
+  distro, not bit-for-bit deterministic.</li>
+<li><code>rosman.lock</code> is regenerated in full each time you run <code>rosman rosdep
+  install</code> — it reflects whatever's currently under <code>src/</code>, not an
+  accumulating history.</li>
+</ul>
 
 
 
@@ -899,10 +899,10 @@ with your <code>rosman.yml</code> and the output of <code>rosman doctor</code>.<
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "content.code.copy", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "content.code.copy", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>
