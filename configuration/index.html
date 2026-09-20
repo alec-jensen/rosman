@@ -16,7 +16,7 @@
         <link rel="prev" href="../getting-started/">
       
       
-        <link rel="next" href="../guides/custom-images/">
+        <link rel="next" href="../guides/networking/">
       
       
         
@@ -475,6 +475,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../guides/networking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Networking (network_mode & ports)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../guides/custom-images/" class="md-nav__link">
         
   
@@ -783,7 +811,8 @@ is required — everything else has a default.</p>
 <div class="highlight"><pre><span></span><code><span class="nt">ros_distro</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">humble</span><span class="w">          </span><span class="c1"># required -- any distro with an official ros:&lt;tag&gt; image</span>
 <span class="nt">rmw_implementation</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cyclonedds</span><span class="w">  </span><span class="c1"># default; cyclonedds is the only supported path today</span>
 <span class="nt">domain_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span><span class="w">               </span><span class="c1"># "auto" = rosman assigns and persists one per project; or an explicit int</span>
-<span class="nt">network</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span><span class="w">              </span><span class="c1"># named Docker network group -- projects sharing a network can discover each other</span>
+<span class="nt">network</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span><span class="w">              </span><span class="c1"># bridge-mode network group name -- ignored under host networking</span>
+<span class="nt">network_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span><span class="w">            </span><span class="c1"># "auto" (host on Linux, bridge on Windows), "host", or "bridge"</span>
 <span class="nt">gpu</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">                    </span><span class="c1"># true enables nvidia-container-toolkit passthrough</span>
 <span class="nt">devices</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span><span class="w">                   </span><span class="c1"># e.g. ["/dev/ttyUSB0"]</span>
 <span class="nt">workspace_dir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.</span><span class="w">              </span><span class="c1"># path (relative to this file) mounted as the container's workspace root</span>
@@ -793,6 +822,7 @@ is required — everything else has a default.</p>
 <span class="nt">setup_script</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span><span class="w">            </span><span class="c1"># optional -- path to a shell script rosman runs during the image build</span>
 <span class="nt">registry_image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span><span class="w">          </span><span class="c1"># optional -- share one built image across a team</span>
 <span class="nt">remote_peers</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span><span class="w">              </span><span class="c1"># optional -- LAN IPs of other machines' rosman containers</span>
+<span class="nt">ports</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span><span class="w">                     </span><span class="c1"># optional -- e.g. ["10000:10000"]; bridge mode only</span>
 </code></pre></div>
 <table>
 <thead>
@@ -821,7 +851,12 @@ is required — everything else has a default.</p>
 <tr>
 <td><code>network</code></td>
 <td><code>"default"</code></td>
-<td>Docker network group name. Other projects using the same <code>network:</code> value can discover each other over DDS.</td>
+<td>Bridge-mode network group name. Other projects using the same <code>network:</code> value can discover each other over DDS. Ignored under host networking.</td>
+</tr>
+<tr>
+<td><code>network_mode</code></td>
+<td><code>"auto"</code></td>
+<td><code>"auto"</code> resolves to host networking on Linux, bridge on Windows. <code>"host"</code>/<code>"bridge"</code> force one regardless of platform. See <a href="../guides/networking/">Networking</a>.</td>
 </tr>
 <tr>
 <td><code>gpu</code></td>
@@ -867,6 +902,11 @@ is required — everything else has a default.</p>
 <td><code>remote_peers</code></td>
 <td><code>[]</code></td>
 <td>LAN IPs of other machines' rosman containers for this project — see <a href="../guides/multi-host/">Multi-host</a>.</td>
+</tr>
+<tr>
+<td><code>ports</code></td>
+<td><code>[]</code></td>
+<td>Bridge-mode-only TCP port publishing, Docker Compose-style (<code>"host:container"</code> or bare <code>"port"</code>). Ignored under host networking, where every container port already is the host's. See <a href="../guides/networking/">Networking</a>.</td>
 </tr>
 </tbody>
 </table>

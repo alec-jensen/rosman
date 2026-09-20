@@ -397,6 +397,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../networking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Networking (network_mode & ports)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../custom-images/" class="md-nav__link">
         
   
@@ -830,10 +858,17 @@ see the robot's topics."</p>
 <p>This extends the same mechanism rosman already uses for same-host
 multi-container discovery (a generated CycloneDDS peers file), rather than
 adding a separate transport: <code>remote_peers</code>' addresses are added to that
-file alongside the local container names, and rosman publishes the exact
-Cyclone DDS port window your <code>domain_id</code> maps to (deterministically, the
-same way on every machine — no coordination needed) so it survives
-Docker's port publishing intact.</p>
+file alongside the local peer entries.</p>
+<p>Under <strong>bridge networking</strong> (see <a href="../networking/">Networking</a> — the
+default on Windows), rosman also publishes the exact Cyclone DDS port
+window your <code>domain_id</code> maps to (deterministically, the same way on every
+machine — no coordination needed) so it survives Docker's port publishing
+intact. Under <strong>host networking</strong> (the Linux default), there's nothing to
+publish at all — the port Cyclone DDS binds is already the host's port,
+reachable from the LAN directly once the OS firewall allows it. Either
+way, <code>rosman doctor</code> reports the same port range, since it comes from
+Cyclone DDS's own port-selection formula, independent of which mode
+you're using.</p>
 <h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
 <ul>
 <li>LAN only — there's no VPN mesh integration for reaching a machine that

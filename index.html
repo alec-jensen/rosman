@@ -462,6 +462,34 @@
   
   
     <li class="md-nav__item">
+      <a href="guides/networking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Networking (network_mode & ports)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="guides/custom-images/" class="md-nav__link">
         
   
@@ -777,7 +805,8 @@ is not supported.</p>
 <li><strong><a href="getting-started/">Getting started</a></strong> — install rosman and run your
   first workspace.</li>
 <li><strong><a href="configuration/">Configuration</a></strong> — the full <code>rosman.yml</code> reference.</li>
-<li><strong>Guides</strong> — <a href="guides/custom-images/">custom base images</a>,
+<li><strong>Guides</strong> — <a href="guides/networking/">networking (network_mode &amp; ports)</a>,
+  <a href="guides/custom-images/">custom base images</a>,
   <a href="guides/rosdep-lockfile/">building from source (rosdep + lock)</a>,
   <a href="guides/team-images/">team-shared images</a>,
   <a href="guides/multi-host/">multi-host over LAN</a>,
@@ -790,9 +819,12 @@ is not supported.</p>
 </ul>
 <h2 id="design-decisions">Design decisions<a class="headerlink" href="#design-decisions" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Bridge network + CycloneDDS unicast peers, not <code>--network host</code>.</strong>
-  Host networking is unreliable on Windows Docker Desktop, so rosman
-  standardizes on Cyclone DDS with explicit unicast peer discovery.</li>
+<li><strong>Host networking on Linux by default, bridge on Windows.</strong> Real
+  <code>--network host</code> is fully reliable on Linux (including WSL2); Docker
+  Desktop's host networking on Windows still has documented reliability
+  issues as of 2026, so Windows defaults to a per-workspace bridge network
+  with explicit CycloneDDS unicast peer discovery instead. Override either
+  direction with <code>network_mode:</code> — see <a href="guides/networking/">Networking</a>.</li>
 <li><strong>One persistent container per workspace.</strong> The first <code>rosman &lt;command&gt;</code>
   starts it; every other <code>rosman &lt;command&gt;</code> is a <code>docker exec</code> into that
   same container.</li>
