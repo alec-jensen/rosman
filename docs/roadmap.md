@@ -732,3 +732,50 @@ rclpy.init(args=args):`, a newer API, on `rolling`; plain
 `rclpy.init(args=args)` on `humble`). Added to troubleshooting.md as a
 general "you probably cloned the wrong branch" pattern, since it's a
 common, non-rosman-specific ROS 2 gotcha.
+
+## Host networking by default on Linux (2026-09-19, v0.3.0)
+
+Real architecture revision, not an incremental feature. Alec wanted
+`ros_tcp_endpoint` (Unity TCP bridge) reachable from Unity running
+natively on the same Linux machine. Full story and reasoning in
+spec.md's sixth addendum -- the short version: proposed a `ports:` config
+field first (built and tested, still used for bridge mode), Alec then
+asked for host networking outright, "good on windows nowadays" per his
+own research. Checked that claim against current (2026) web sources
+before accepting it -- turned out still false for Windows specifically
+(an open `microsoft/WSL` issue, a documented WSL2-mirrored-mode/Docker
+Desktop port-proxying conflict "as of mid-2026"). Landed on: host
+networking default on Linux only (including WSL2, a real Linux kernel),
+bridge stays default on Windows, `network_mode: host`/`bridge` overrides
+either way.
+
+- `lifecycle.resolve_network_mode`: `"auto"` -> `platform.system() ==
+  "Linux"` ? `"host"` : `"bridge"`.
+- Host mode: no bridge network, no port publishing, CycloneDDS same-host
+  discovery collapses to a bare `127.0.0.1` peer
+  (`networking.refresh_peers_host_mode`). `remote_peers` needs no
+  publishing either, live-verified: a plain `python3 -m http.server`
+  bound inside a host-mode container was reachable from the host via
+  `curl` with zero `-p` flags -- exactly the `ros_tcp_endpoint` scenario
+  that started this.
+- Bridge mode unchanged, plus the new `ports:` field (Compose-style)
+  live-verified too: explicit `["18766:18765"]` correctly published and
+  reachable.
+- Rejected an unconditional "publish every port, zero config" alternative
+  after measuring it directly: publishing ~2100 ports made
+  `container.start()` hang past Docker's 60s API timeout. Bounded,
+  explicit `ports:` avoided this.
+- `rosman doctor --network-check`'s round trip now resolves and tests
+  whichever mode the real workspace actually uses, instead of always
+  bridge -- otherwise the check wasn't representative.
+- `network_mode` added to `detect_drift` (new `NETWORK_MODE_LABEL`) but
+  deliberately not `compute_config_hash` -- a container-creation setting,
+  not an image-build one, matching `devices`/`gpu` precedent.
+
+This is the first genuine reversal of an original "non-negotiable" spec
+decision in the project's history, and the first addendum whose trigger
+was a live web-search fact-check rather than a design conversation or
+container testing alone -- worth remembering the pattern: check a
+platform-reliability claim against current, dated sources before
+accepting or rejecting it, especially when the original reasoning was
+itself platform-specific and time-sensitive.

@@ -29,7 +29,8 @@ is not supported.
 - **[Getting started](getting-started.md)** — install rosman and run your
   first workspace.
 - **[Configuration](configuration.md)** — the full `rosman.yml` reference.
-- **Guides** — [custom base images](guides/custom-images.md),
+- **Guides** — [networking (network_mode & ports)](guides/networking.md),
+  [custom base images](guides/custom-images.md),
   [building from source (rosdep + lock)](guides/rosdep-lockfile.md),
   [team-shared images](guides/team-images.md),
   [multi-host over LAN](guides/multi-host.md),
@@ -42,9 +43,12 @@ is not supported.
 
 ## Design decisions
 
-- **Bridge network + CycloneDDS unicast peers, not `--network host`.**
-  Host networking is unreliable on Windows Docker Desktop, so rosman
-  standardizes on Cyclone DDS with explicit unicast peer discovery.
+- **Host networking on Linux by default, bridge on Windows.** Real
+  `--network host` is fully reliable on Linux (including WSL2); Docker
+  Desktop's host networking on Windows still has documented reliability
+  issues as of 2026, so Windows defaults to a per-workspace bridge network
+  with explicit CycloneDDS unicast peer discovery instead. Override either
+  direction with `network_mode:` — see [Networking](guides/networking.md).
 - **One persistent container per workspace.** The first `rosman <command>`
   starts it; every other `rosman <command>` is a `docker exec` into that
   same container.

@@ -510,3 +510,102 @@ Design:
   same distro; not bit-for-bit deterministic. Explicitly accepted as
   "good enough," matching the tradeoff already made for `registry_image`
   sharing.
+
+---
+
+## Addendum (2026-09-19, part 6): host networking by default on Linux
+
+§2's very first non-negotiable design decision was "bridge network +
+CycloneDDS unicast peers, never `--network host`... because host
+networking on Windows Docker Desktop is unreliable." This addendum
+revises that default — the first time a "do not re-litigate" decision in
+this spec has actually been changed, not just extended.
+
+Trigger: Alec wanted to run `ros_tcp_endpoint` (a TCP bridge for Unity)
+inside a rosman container and connect to it from Unity running natively
+on the same Linux machine. The immediate problem was two-layered — the
+endpoint was bound to `127.0.0.1` (only reachable inside the container's
+own loopback, regardless of network mode) and, more fundamentally, rosman
+had no mechanism at all for publishing an arbitrary TCP port out of a
+bridge-mode container. A `ports:` config field (Docker Compose-style) was
+the obvious fix and got built (see below) — but partway through, Alec
+said plainly: "what if i just dont want to have to worry about port
+bindings" and then "i want host networking essentially is what i want."
+
+That's a real architectural fork, not a config tweak, so it got treated
+as one:
+
+- First response: `--network host` conflicts directly with §2's stated
+  reason (Windows Docker Desktop reliability). Proposed making it an
+  explicit opt-in field instead of touching the default.
+- Alec pushed back: "host networking according to my research is good on
+  windows nowadays, lets just make it the default everywhere."
+- Rather than accept or reject that claim from training-data memory
+  (which could easily be stale on a fast-moving, platform-specific
+  question like this), it was checked directly via web search dated to
+  the actual current time (2026-09-19). Result: the claim didn't hold up.
+  Real, current, dated evidence: an open `microsoft/WSL` GitHub issue
+  where host-networked containers' routes aren't reachable from WSL2 or
+  Windows, and a documented conflict between WSL2's mirrored networking
+  mode and Docker Desktop's own port proxying "as of mid-2026." §2's
+  original reasoning is still correct on Windows specifically, today.
+- Reported the finding back with sources rather than silently overriding
+  the request, and re-proposed: default to host networking on **Linux
+  only** (where it's genuinely as reliable as any native process, since
+  WSL2 is a real Linux kernel and host mode there involves no VM boundary
+  crossing at all), keep bridge as the Windows default, both overridable
+  via an explicit `network_mode: host`/`bridge`. Alec agreed to this
+  narrower version.
+
+Design, once scope was settled:
+
+- `network_mode: auto` (new field, default) resolves per-platform at
+  container-creation time: `"host"` if `platform.system() == "Linux"`
+  (true for WSL2 too — it reports as Linux), `"bridge"` otherwise.
+  `"host"`/`"bridge"` force one explicitly regardless of platform.
+- **Host mode** skips the rosman-managed bridge network entirely (no
+  `ensure_network`/`network.connect()`), passes `network_mode="host"` to
+  `docker create`, and needs no port publishing at all — verified
+  directly: a plain `python3 -m http.server` bound inside a host-mode
+  container was reachable from the host via `curl 127.0.0.1:<port>` with
+  zero `-p` flags. CycloneDDS same-host discovery collapses to a bare
+  `127.0.0.1` peer entry (`networking.refresh_peers_host_mode`) — no
+  Docker network to introspect for peer container names at all, since
+  every host-mode container already shares the machine's real network
+  namespace directly.
+- **`remote_peers` under host mode** needs no port publishing either —
+  whatever port Cyclone DDS binds to is already the host's port, reachable
+  from the LAN once the firewall allows it. `rosman doctor`'s reported
+  port range (`dds_port_range`) stays accurate regardless of mode, since
+  it's Cyclone's own port-selection formula, not a Docker artifact.
+- **The `ports:` field** (Compose-style, `"host:container"` or bare
+  `"port"`) still exists for bridge mode, and is documented as ignored
+  under host mode. Built and tested *before* the host-networking pivot,
+  for the Windows case where bridge stays the default. A "publish every
+  port unconditionally, zero config" alternative was tried first and
+  rejected after a real measurement: publishing ~2100 ports made
+  `container.start()` hang past a 60s Docker API timeout. Explicit,
+  bounded `ports:` avoided that entirely.
+- **Known, accepted tradeoff of host mode**: two different rosman
+  workspaces on the same machine can't both bind the same fixed TCP port
+  simultaneously — identical to two native processes competing for a
+  port. Not something rosman tries to prevent; documented as a real
+  limitation, not silently papered over.
+- `network_mode` participates in `detect_drift` (a new
+  `NETWORK_MODE_LABEL`, alongside the existing network-group one) but
+  deliberately not in `compute_config_hash` — it changes container
+  *creation* flags, not anything about the built image, matching how
+  `devices`/`gpu` were already handled the same way.
+- `rosman doctor --network-check`'s round-trip test now resolves and uses
+  the same network mode the real workspace would, rather than always
+  testing bridge mode regardless of what a workspace actually runs under
+  — otherwise the check wouldn't be representative of the real container.
+
+This is the first spec addendum in the project whose trigger was
+explicitly checking a factual claim against live, dated web evidence
+before implementing, rather than deciding purely from a design
+conversation or empirical container testing (the pattern every other
+addendum here follows). Worth remembering: a "non-negotiable" decision is
+non-negotiable relative to the facts that justified it at the time, not
+forever — the right response to "that reasoning might be outdated" is to
+go check, not to assume either that it still holds or that it doesn't.

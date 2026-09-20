@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import platform
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -35,6 +36,7 @@ from rosman.docker_client import (
     DOMAIN_ID_LABEL,
     MANAGED_LABEL,
     NETWORK_GROUP_LABEL,
+    NETWORK_MODE_LABEL,
     RESTART_POLICY_LABEL,
     WORKSPACE_LABEL,
 )
@@ -46,6 +48,7 @@ from rosman.networking import (
     dds_port_range,
     ensure_network,
     refresh_peers,
+    refresh_peers_host_mode,
 )
 from rosman.platform_support import gui_passthrough
 from rosman.progress import DockerStreamError, NullReporter, ProgressReporter
@@ -111,6 +114,46 @@ def host_uid_gid() -> tuple[int, int]:
     # conventional first-user id. rosman's supported Windows path runs
     # through WSL2, where os.getuid() is always available.
     return 1000, 1000
+
+
+def resolve_network_mode(config: RosmanConfig) -> str:
+    """`network_mode: auto` resolves to "host" on Linux (including WSL2,
+    which reports `platform.system() == "Linux"` -- it's a real Linux
+    kernel, so host networking there is exactly as reliable as native
+    Linux) and "bridge" everywhere else. As of 2026, Docker Desktop's own
+    host-networking support on native Windows still has real, current,
+    documented issues (see spec.md's sixth addendum) -- this is a live
+    fact worth rechecking if revisiting this default, not a permanent one.
+    `network_mode: host`/`bridge` in rosman.yml force one or the other
+    regardless of platform."""
+    if config.network_mode == "auto":
+        return "host" if platform.system() == "Linux" else "bridge"
+    return config.network_mode
+
+
+def _parse_port_spec(spec: str) -> tuple[str, int]:
+    """"10000:10000" -> ("10000/tcp", 10000); "10000" -> ("10000/tcp", 10000)."""
+    parts = spec.split(":")
+    host_port = parts[0]
+    container_port = parts[-1]
+    return f"{container_port}/tcp", int(host_port)
+
+
+def resolve_ports(config: RosmanConfig, domain_id: int) -> dict[str, int] | None:
+    """Bridge-mode-only port publishing: `ports:` (user-declared, TCP,
+    e.g. a rosbridge/ros_tcp_endpoint-style service) merged with the
+    `remote_peers`-driven Cyclone DDS port window (see
+    `networking.dds_port_range`). Host mode needs neither -- every
+    container port already *is* the host's port -- so callers should only
+    reach this when `resolve_network_mode` returned "bridge"."""
+    ports: dict[str, int] = {}
+    for spec in config.ports:
+        key, host_port = _parse_port_spec(spec)
+        ports[key] = host_port
+    if config.remote_peers:
+        for port in dds_port_range(domain_id):
+            ports[f"{port}/udp"] = port
+    return ports or None
 
 
 def _setup_script_digest(config: RosmanConfig) -> str:
@@ -462,6 +505,12 @@ class ContainerManager:
             reasons.append(
                 f"network group changed ({labels.get(NETWORK_GROUP_LABEL)!r} -> {config.network!r})"
             )
+        resolved_network_mode = resolve_network_mode(config)
+        if labels.get(NETWORK_MODE_LABEL) != resolved_network_mode:
+            reasons.append(
+                f"network mode changed ({labels.get(NETWORK_MODE_LABEL)!r} -> "
+                f"{resolved_network_mode!r})"
+            )
         domain_id = self.resolve_domain_id(config)
         if labels.get(DOMAIN_ID_LABEL) != str(domain_id):
             reasons.append(
@@ -493,9 +542,19 @@ class ContainerManager:
         image_tag = image_result.tag
         domain_id = self.resolve_domain_id(config)
         name = container_name(config.workspace_root)
+        network_mode = resolve_network_mode(config)
 
-        ensure_network(self.client, config.network)
-        cyclonedds_path = refresh_peers(self.client, config.network, config.remote_peers)
+        # Host mode: every container already shares this machine's real
+        # network namespace, so there's no bridge network to create/join
+        # and no port publishing to compute at all (see networking.py's
+        # module docstring). Bridge mode: unchanged from before.
+        ports: dict[str, int] | None = None
+        if network_mode == "host":
+            cyclonedds_path = refresh_peers_host_mode(config.remote_peers)
+        else:
+            ensure_network(self.client, config.network)
+            cyclonedds_path = refresh_peers(self.client, config.network, config.remote_peers)
+            ports = resolve_ports(config, domain_id)
 
         volumes = {
             str(config.workspace_root): {"bind": CONTAINER_WORKSPACE_PATH, "mode": "rw"},
@@ -533,21 +592,13 @@ class ContainerManager:
             environment.update(gui.environment)
             volumes.update(gui.volumes)
 
-        # LAN multi-host discovery (`remote_peers`): publish the Cyclone DDS
-        # port window 1:1 so its self-advertised port numbers stay valid
-        # once NAT'd through Docker's port publishing. See dds_port_range's
-        # docstring and networking.py's module docstring for why this is
-        # safe to derive with no coordination with the remote machine.
-        ports = None
-        if config.remote_peers:
-            ports = {f"{port}/udp": port for port in dds_port_range(domain_id)}
-
         labels = {
             MANAGED_LABEL: "true",
             WORKSPACE_LABEL: str(config.workspace_root),
             DISTRO_LABEL: config.ros_distro,
             CONFIG_HASH_LABEL: config_hash,
             NETWORK_GROUP_LABEL: config.network,
+            NETWORK_MODE_LABEL: network_mode,
             DOMAIN_ID_LABEL: str(domain_id),
             RESTART_POLICY_LABEL: config.restart_policy,
         }
@@ -565,15 +616,20 @@ class ContainerManager:
             device_requests=device_requests,
             group_add=group_add,
             ports=ports,
+            network_mode="host" if network_mode == "host" else None,
             restart_policy={"Name": config.restart_policy},
             labels=labels,
             working_dir=CONTAINER_WORKSPACE_PATH,
             user=f"{uid}:{gid}",
         )
-        network = ensure_network(self.client, config.network)
-        network.connect(container, aliases=[name])
+        if network_mode != "host":
+            network = ensure_network(self.client, config.network)
+            network.connect(container, aliases=[name])
         container.start()
-        refresh_peers(self.client, config.network, config.remote_peers)
+        if network_mode == "host":
+            refresh_peers_host_mode(config.remote_peers)
+        else:
+            refresh_peers(self.client, config.network, config.remote_peers)
         self.state.set_container_name(config.workspace_root, name)
         return container
 

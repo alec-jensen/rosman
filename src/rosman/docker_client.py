@@ -17,6 +17,7 @@ WORKSPACE_LABEL = "rosman.workspace"
 DISTRO_LABEL = "rosman.distro"
 CONFIG_HASH_LABEL = "rosman.config_hash"
 NETWORK_GROUP_LABEL = "rosman.network_group"
+NETWORK_MODE_LABEL = "rosman.network_mode"
 DOMAIN_ID_LABEL = "rosman.domain_id"
 RESTART_POLICY_LABEL = "rosman.restart_policy"
 

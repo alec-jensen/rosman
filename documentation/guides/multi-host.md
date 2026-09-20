@@ -40,10 +40,18 @@ see the robot's topics."
 This extends the same mechanism rosman already uses for same-host
 multi-container discovery (a generated CycloneDDS peers file), rather than
 adding a separate transport: `remote_peers`' addresses are added to that
-file alongside the local container names, and rosman publishes the exact
-Cyclone DDS port window your `domain_id` maps to (deterministically, the
-same way on every machine — no coordination needed) so it survives
-Docker's port publishing intact.
+file alongside the local peer entries.
+
+Under **bridge networking** (see [Networking](networking.md) — the
+default on Windows), rosman also publishes the exact Cyclone DDS port
+window your `domain_id` maps to (deterministically, the same way on every
+machine — no coordination needed) so it survives Docker's port publishing
+intact. Under **host networking** (the Linux default), there's nothing to
+publish at all — the port Cyclone DDS binds is already the host's port,
+reachable from the LAN directly once the OS firewall allows it. Either
+way, `rosman doctor` reports the same port range, since it comes from
+Cyclone DDS's own port-selection formula, independent of which mode
+you're using.
 
 ## Limitations
 

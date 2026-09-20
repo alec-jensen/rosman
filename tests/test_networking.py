@@ -1,7 +1,13 @@
 import socket
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
-from rosman.networking import dds_port_range, detect_lan_ip, render_cyclonedds_xml
+from rosman.networking import (
+    dds_port_range,
+    detect_lan_ip,
+    refresh_peers_host_mode,
+    render_cyclonedds_xml,
+)
 
 
 def test_render_with_no_peers():
@@ -85,3 +91,22 @@ def test_detect_lan_ip_returns_local_address(monkeypatch):
 
     monkeypatch.setattr(socket, "socket", lambda *a, **k: FakeSocket())
     assert detect_lan_ip() == "192.168.1.50"
+
+
+def test_refresh_peers_host_mode_uses_loopback(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("rosman.networking.state_dir", lambda: tmp_path)
+
+    path = refresh_peers_host_mode()
+
+    xml = path.read_text()
+    assert '<Peer address="127.0.0.1" />' in xml
+
+
+def test_refresh_peers_host_mode_includes_remote_peers(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("rosman.networking.state_dir", lambda: tmp_path)
+
+    path = refresh_peers_host_mode(["192.168.1.51"])
+
+    xml = path.read_text()
+    assert '<Peer address="127.0.0.1" />' in xml
+    assert '<Peer address="192.168.1.51" />' in xml

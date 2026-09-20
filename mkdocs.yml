@@ -36,6 +36,7 @@ nav:
   - Getting started: getting-started.md
   - Configuration: configuration.md
   - Guides:
+      - Networking (network_mode & ports): guides/networking.md
       - Custom base images & setup scripts: guides/custom-images.md
       - Building from source (rosdep + lock): guides/rosdep-lockfile.md
       - Team-shared images: guides/team-images.md

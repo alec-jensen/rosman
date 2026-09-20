@@ -73,10 +73,22 @@ which branch you're on, and re-clone with `git clone -b <your_distro>
 
 **`ros2 topic list`/GUI apps don't show anything from another rosman
 project.** Confirm both projects use the same `network:` group in their
-`rosman.yml` — only projects in the same group can discover each other.
-Run `rosman doctor --network-check` to verify the underlying DDS discovery
-mechanism itself works (it spins up two throwaway containers and confirms
-one actually receives what the other publishes).
+`rosman.yml` — only projects in the same group can discover each other
+(bridge mode only; under host networking, `network:` is ignored and
+same-machine discovery always works via `localhost`). Run `rosman doctor
+--network-check` to verify the underlying DDS discovery mechanism itself
+works (it spins up two throwaway containers and confirms one actually
+receives what the other publishes).
+
+**A TCP service inside the container (a `ros_tcp_endpoint`-style bridge
+for Unity, a web dashboard, ...) isn't reachable from outside.** Two
+separate things to check: (1) it needs to bind `0.0.0.0`, not
+`127.0.0.1`, inside the container — `127.0.0.1` only ever means "this
+container's own loopback," never the host's, regardless of network mode.
+(2) Under bridge networking (Windows by default), the port also needs to
+be published via `ports:` in `rosman.yml` — see
+[Networking](guides/networking.md). Under host networking (the Linux
+default), (1) alone is enough; there's no publishing step.
 
 **A GUI window (rviz2, rqt, ...) doesn't appear.** Make sure the package
 providing it is actually installed (`extra_apt_packages`) — rosman wires

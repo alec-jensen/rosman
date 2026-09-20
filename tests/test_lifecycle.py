@@ -16,6 +16,8 @@ from rosman.lifecycle import (
     ImageResult,
     compute_config_hash,
     render_dockerfile,
+    resolve_network_mode,
+    resolve_ports,
 )
 from rosman.networking import dds_port_range
 from rosman.state import RosmanState
@@ -344,7 +346,13 @@ def test_create_container_publishes_dds_ports_when_remote_peers_configured(
         "ensure_image",
         lambda config, config_hash, reporter=None: ImageResult("tag", "cached"),
     )
-    config = make_config(tmp_path, 'domain_id: 5\nremote_peers: ["192.168.1.51"]\n')
+    # network_mode: bridge forced explicitly -- port publishing is a
+    # bridge-only concept (host mode needs none at all, see
+    # test_create_container_host_mode_needs_no_port_publishing), and CI
+    # runs on Linux where `auto` would otherwise resolve to host mode.
+    config = make_config(
+        tmp_path, 'domain_id: 5\nnetwork_mode: bridge\nremote_peers: ["192.168.1.51"]\n'
+    )
 
     manager.create_container(config)
 
@@ -369,6 +377,92 @@ def test_create_container_no_ports_without_remote_peers(tmp_path: Path, monkeypa
 
     _, kwargs = client.containers.create.call_args
     assert kwargs["ports"] is None
+
+
+def test_resolve_network_mode_auto_is_platform_dependent(monkeypatch):
+    import platform as platform_mod
+
+    from rosman.config import parse_config as _parse
+
+    config = _parse("ros_distro: humble\n", Path("/tmp/rosman.yml"))
+    monkeypatch.setattr(platform_mod, "system", lambda: "Linux")
+    assert resolve_network_mode(config) == "host"
+    monkeypatch.setattr(platform_mod, "system", lambda: "Windows")
+    assert resolve_network_mode(config) == "bridge"
+
+
+def test_resolve_network_mode_explicit_overrides_platform(tmp_path: Path, monkeypatch):
+    import platform as platform_mod
+
+    monkeypatch.setattr(platform_mod, "system", lambda: "Linux")
+    bridge_config = make_config(tmp_path, "network_mode: bridge\n")
+    assert resolve_network_mode(bridge_config) == "bridge"
+
+    monkeypatch.setattr(platform_mod, "system", lambda: "Windows")
+    host_config = make_config(tmp_path, "network_mode: host\n")
+    assert resolve_network_mode(host_config) == "host"
+
+
+def test_resolve_ports_merges_declared_ports_and_dds_range(tmp_path: Path):
+    config = make_config(
+        tmp_path, 'ports: ["10000:10000", "8080"]\nremote_peers: ["192.168.1.51"]\ndomain_id: 5\n'
+    )
+    ports = resolve_ports(config, 5)
+    assert ports["10000/tcp"] == 10000
+    assert ports["8080/tcp"] == 8080
+    for p in dds_port_range(5):
+        assert ports[f"{p}/udp"] == p
+
+
+def test_resolve_ports_none_when_nothing_declared(tmp_path: Path):
+    config = make_config(tmp_path)
+    assert resolve_ports(config, 0) is None
+
+
+def test_create_container_host_mode_needs_no_port_publishing_or_bridge_network(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr("rosman.lifecycle.state_dir", lambda: tmp_path)
+    monkeypatch.setattr("rosman.networking.state_dir", lambda: tmp_path)
+    client = MagicMock()
+    manager = make_manager(tmp_path, client)
+    monkeypatch.setattr(
+        manager,
+        "ensure_image",
+        lambda config, config_hash, reporter=None: ImageResult("tag", "cached"),
+    )
+    # remote_peers set to prove host mode skips DDS port publishing too,
+    # not just the plain "no ports declared" case.
+    config = make_config(
+        tmp_path, 'network_mode: host\ndomain_id: 5\nremote_peers: ["192.168.1.51"]\n'
+    )
+
+    manager.create_container(config)
+
+    _, kwargs = client.containers.create.call_args
+    assert kwargs["ports"] is None
+    assert kwargs["network_mode"] == "host"
+    client.networks.get.assert_not_called()
+    client.networks.create.assert_not_called()
+
+
+def test_create_container_bridge_mode_still_joins_network(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("rosman.lifecycle.state_dir", lambda: tmp_path)
+    monkeypatch.setattr("rosman.networking.state_dir", lambda: tmp_path)
+    client = MagicMock()
+    manager = make_manager(tmp_path, client)
+    monkeypatch.setattr(
+        manager,
+        "ensure_image",
+        lambda config, config_hash, reporter=None: ImageResult("tag", "cached"),
+    )
+    config = make_config(tmp_path, "network_mode: bridge\n")
+
+    manager.create_container(config)
+
+    _, kwargs = client.containers.create.call_args
+    assert kwargs["network_mode"] is None
+    client.networks.get.return_value.connect.assert_called_once()
 
 
 def test_push_image_wraps_api_error(tmp_path: Path):

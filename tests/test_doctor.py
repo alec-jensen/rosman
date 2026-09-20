@@ -11,7 +11,13 @@ from rosman.lifecycle import ImageResult
 
 def make_config(tmp_path: Path):
     path = tmp_path / "rosman.yml"
-    return parse_config("ros_distro: humble\nnetwork: fleet\n", path)
+    # network_mode forced explicitly: these tests exercise the bridge-mode
+    # round trip specifically (see the test_*_host_mode_* tests below for
+    # the other path) -- "auto" would resolve to "host" on the Linux
+    # machines these tests actually run on (CI included), silently testing
+    # the wrong code path and calling the real (unmocked)
+    # refresh_peers_host_mode, which touches the real state directory.
+    return parse_config("ros_distro: humble\nnetwork: fleet\nnetwork_mode: bridge\n", path)
 
 
 class FakeManager:
@@ -100,6 +106,36 @@ def test_run_network_roundtrip_cleans_up_on_exception(monkeypatch, tmp_path: Pat
     listener.remove.assert_called_once_with(force=True)
 
 
+def make_host_mode_config(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    return parse_config("ros_distro: humble\nnetwork_mode: host\n", path)
+
+
+def _patch_networking_host(monkeypatch, tmp_path):
+    monkeypatch.setattr(doctor_mod, "refresh_peers_host_mode", lambda *a: tmp_path / "cdds.xml")
+
+
+def test_run_network_roundtrip_host_mode_skips_bridge_network(monkeypatch, tmp_path: Path):
+    config = make_host_mode_config(tmp_path)
+    _patch_networking_host(monkeypatch, tmp_path)
+
+    talker, listener = MagicMock(), MagicMock()
+    listener.exec_run.return_value = (0, b'data: "rosman doctor"\n')
+
+    client = MagicMock()
+    client.containers.get.side_effect = NotFound("not found")
+    client.containers.create.side_effect = [talker, listener]
+
+    check = doctor_mod.run_network_roundtrip(client, FakeManager(), config)
+
+    assert check.ok
+    client.networks.get.assert_not_called()
+    client.networks.create.assert_not_called()
+    _, kwargs = client.containers.create.call_args_list[0]
+    assert kwargs["network_mode"] == "host"
+    assert kwargs["network"] is None
+
+
 def test_usbipd_hint_without_binary(monkeypatch):
     monkeypatch.setattr(doctor_mod.shutil, "which", lambda _name: None)
     hint = doctor_mod._usbipd_hint("/dev/ttyUSB0")
@@ -166,3 +202,30 @@ def test_run_checks_skips_lan_check_without_remote_peers(monkeypatch, tmp_path: 
 
     checks = doctor_mod.run_checks(config, network_check=False)
     assert not any(c.name == "multi-host (LAN)" for c in checks)
+
+
+def test_run_checks_reports_explicit_network_mode(monkeypatch, tmp_path: Path):
+    from rosman.lifecycle import ContainerManager
+
+    config = make_config(tmp_path)  # forces network_mode: bridge
+    monkeypatch.setattr(doctor_mod, "get_client", lambda: MagicMock())
+    monkeypatch.setattr(ContainerManager, "find_container", lambda self, config: None)
+
+    checks = doctor_mod.run_checks(config, network_check=False)
+    check = next(c for c in checks if c.name == "network mode")
+    assert check.ok
+    assert check.detail == "bridge"
+
+
+def test_run_checks_reports_auto_network_mode_with_note(monkeypatch, tmp_path: Path):
+    from rosman.lifecycle import ContainerManager
+
+    path = tmp_path / "rosman.yml"
+    config = parse_config("ros_distro: humble\n", path)  # network_mode left at "auto"
+    monkeypatch.setattr(doctor_mod, "get_client", lambda: MagicMock())
+    monkeypatch.setattr(ContainerManager, "find_container", lambda self, config: None)
+
+    checks = doctor_mod.run_checks(config, network_check=False)
+    check = next(c for c in checks if c.name == "network mode")
+    assert check.ok
+    assert "auto-detected" in check.detail

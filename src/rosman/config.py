@@ -43,10 +43,13 @@ RESTART_POLICIES = {"no", "unless-stopped", "always", "on-failure"}
 
 REQUIRED_FIELDS = ("ros_distro",)
 
+NETWORK_MODES = {"auto", "host", "bridge"}
+
 _DEFAULTS: dict[str, Any] = {
     "rmw_implementation": "cyclonedds",
     "domain_id": "auto",
     "network": "default",
+    "network_mode": "auto",
     "gpu": False,
     "devices": [],
     "workspace_dir": ".",
@@ -56,6 +59,7 @@ _DEFAULTS: dict[str, Any] = {
     "setup_script": None,
     "registry_image": None,
     "remote_peers": [],
+    "ports": [],
 }
 
 
@@ -67,6 +71,7 @@ class RosmanConfig:
     rmw_implementation: str = "cyclonedds"
     domain_id: int | str = "auto"
     network: str = "default"
+    network_mode: str = "auto"
     gpu: bool = False
     devices: list[str] = field(default_factory=list)
     workspace_dir: str = "."
@@ -76,6 +81,7 @@ class RosmanConfig:
     setup_script: str | None = None
     registry_image: str | None = None
     remote_peers: list[str] = field(default_factory=list)
+    ports: list[str] = field(default_factory=list)
 
     # Not part of the YAML schema — filled in by the loader from
     # rosman.lock (see lock_path/read_lock), never written in rosman.yml
@@ -181,6 +187,36 @@ def _validate_remote_peers(value: Any, path: Path) -> list[str]:
             "machine to see the address to put here."
         )
     return value
+
+
+def _validate_network_mode(value: Any, path: Path) -> str:
+    if value not in NETWORK_MODES:
+        raise ConfigError(
+            f"{path}: 'network_mode' must be one of {', '.join(sorted(NETWORK_MODES))} "
+            f"(got {value!r})."
+        )
+    return value
+
+
+def _validate_ports(value: Any, path: Path) -> list[str]:
+    if not isinstance(value, list):
+        raise ConfigError(
+            f"{path}: 'ports' must be a list of strings, e.g. [\"10000:10000\"] "
+            "(host_port:container_port, or just \"10000\" for the same port on both "
+            "sides). Only used when network_mode resolves to \"bridge\" -- ignored "
+            "under host networking, where every container port is already the host's."
+        )
+    result: list[str] = []
+    for item in value:
+        spec = str(item)
+        parts = spec.split(":")
+        if len(parts) not in (1, 2) or not all(p.isdigit() and p for p in parts):
+            raise ConfigError(
+                f"{path}: 'ports' entries must be \"port\" or "
+                f"\"host_port:container_port\" (got {item!r})."
+            )
+        result.append(spec)
+    return result
 
 
 def _validate_setup_script(value: Any, path: Path) -> str | None:
@@ -304,6 +340,9 @@ def _build_config(data: dict[str, Any], path: Path) -> RosmanConfig:
         rmw_implementation=rmw,
         domain_id=domain_id,
         network=network,
+        network_mode=_validate_network_mode(
+            data.get("network_mode", _DEFAULTS["network_mode"]), path
+        ),
         gpu=gpu,
         devices=_validate_devices(data.get("devices", list(_DEFAULTS["devices"])), path),
         workspace_dir=workspace_dir,
@@ -319,6 +358,7 @@ def _build_config(data: dict[str, Any], path: Path) -> RosmanConfig:
             data.get("registry_image", _DEFAULTS["registry_image"]), path
         ),
         remote_peers=remote_peers,
+        ports=_validate_ports(data.get("ports", list(_DEFAULTS["ports"])), path),
         config_path=path,
     )
 

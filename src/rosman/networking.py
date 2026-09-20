@@ -1,9 +1,19 @@
-"""Networking layer: shared bridge networks + CycloneDDS unicast peer config.
+"""Networking layer: shared bridge networks (or host networking) +
+CycloneDDS unicast peer config.
 
-Design (see spec §5): rosman never uses `--network host`, since host
-networking on Windows Docker Desktop is unreliable for multicast/port
-forwarding. Instead:
+Design (see spec §5, and its sixth addendum for the network_mode revision):
+rosman defaults to a per-workspace bridge network on Windows, since host
+networking is still documented as unreliable there as of 2026 (real,
+current Docker Desktop/WSL2 issues -- not just historical caution). On
+Linux (including WSL2, which reports as Linux), `--network host` is fully
+reliable and is the default (`network_mode: auto`, see
+`lifecycle.resolve_network_mode`) -- it needs no bridge network, no port
+publishing, and no per-container DNS name resolution at all, since every
+host-mode container already shares the actual machine's network namespace
+directly. `network_mode: host`/`bridge` in rosman.yml force one or the
+other regardless of platform.
 
+**Bridge mode** (`refresh_peers`, `ensure_network`, `peer_container_names`):
   - Every container in the same `network:` group (from rosman.yml) joins one
     rosman-managed Docker bridge network, named `rosman-net-<group>`.
     Docker's embedded DNS makes containers resolvable by name on it, so peer
@@ -11,27 +21,38 @@ forwarding. Instead:
   - A single CycloneDDS XML file is generated per network group, listing
     every rosman-managed container currently on that network as a unicast
     discovery peer, and is bind-mounted read-only into every container in
-    the group at the same host path. Because it's one shared file rather
-    than one copy per container, updating it once (via `refresh_peers`)
-    is instantly visible to every container without touching each one
-    individually or restarting anything — CycloneDDS re-reads
-    `CYCLONEDDS_URI` at process startup, and rosman only ever starts new
-    ROS 2 processes via fresh `docker exec` calls, so the very next
-    `rosman ...` invocation in any container picks up the current peer set.
+    the group at the same host path.
 
-Multi-host (LAN) discovery extends the same peers file with entries for
-other machines' `remote_peers` (rosman.yml), rather than a new mechanism --
-see docs/spec.md's third addendum. Alec's explicit call: no VPN mesh, LAN
-only. This only works because `remote_peers` requires an explicit
-(non-"auto") `domain_id` (enforced in config.py), which two machines running
-the same checked-in rosman.yml therefore always agree on -- that in turn
-lets both sides independently compute the *same* CycloneDDS discovery port
-window from `dds_port_range()` with no coordination needed, since Cyclone's
-own default port formula (`PB=7400, DG=250, PG=2`) already derives a port
-purely from `domain_id` + local participant index. rosman just needs to
-publish that whole window 1:1 (container port == host port) so the port
-number Cyclone embeds in its own SPDP announcements stays valid once NAT'd
-through Docker's port publishing.
+**Host mode** (`refresh_peers_host_mode`): every host-mode container on this
+machine already shares the real network namespace, so same-host discovery
+is just `127.0.0.1` -- no Docker network to introspect for peer container
+names, and no port publishing for `remote_peers` either (a container's own
+bound port already *is* the host's port, reachable from the LAN directly
+once the OS firewall allows it). The one tradeoff, inherent to host
+networking and not something rosman tries to paper over: two *different*
+rosman workspaces on the same host cannot both bind the same *fixed* TCP
+port at once (e.g. two workspaces both trying to run something on
+port 10000) -- exactly like two native host processes competing for a port.
+
+Both modes share one file-generation mechanism (`render_cyclonedds_xml`),
+just fed a different peer list. Updating it once (via either refresh
+function) is instantly visible to every container without touching each
+one individually or restarting anything — CycloneDDS re-reads
+`CYCLONEDDS_URI` at process startup, and rosman only ever starts new ROS 2
+processes via fresh `docker exec` calls, so the very next `rosman ...`
+invocation in any container picks up the current peer set.
+
+Multi-host (LAN) discovery extends the peers file with entries for other
+machines' `remote_peers` (rosman.yml) in both modes -- see docs/spec.md's
+third addendum. Alec's explicit call: no VPN mesh, LAN only. This only
+works because `remote_peers` requires an explicit (non-"auto") `domain_id`
+(enforced in config.py), which two machines running the same checked-in
+rosman.yml therefore always agree on -- that in turn lets both sides
+independently compute the *same* CycloneDDS discovery port window from
+`dds_port_range()` with no coordination needed (used for bridge-mode port
+publishing; host mode doesn't need it, but the port numbers it describes
+are still accurate for firewall purposes either way, since they come from
+Cyclone DDS's own port-selection formula, unrelated to Docker networking).
 """
 
 from __future__ import annotations
@@ -146,7 +167,8 @@ def render_cyclonedds_xml(peers: list[str], remote_peers: list[str] | None = Non
 def refresh_peers(
     client: docker.DockerClient, group: str, remote_peers: list[str] | None = None
 ) -> Path:
-    """Regenerate the shared CycloneDDS peers file for a network group.
+    """Regenerate the shared CycloneDDS peers file for a network group
+    (bridge mode only -- see `refresh_peers_host_mode` for host mode).
 
     Returns the host path that's bind-mounted into every container in the
     group; callers don't need to touch any container to make the update
@@ -155,4 +177,24 @@ def refresh_peers(
     peers = peer_container_names(client, group)
     host_path = cyclonedds_host_path(group)
     host_path.write_text(render_cyclonedds_xml(peers, remote_peers))
+    return host_path
+
+
+# Not a real `network:` group name -- just a fixed key so every host-mode
+# container across every workspace on this machine shares the one peers
+# file (there's no separate bridge network per group to key off in host
+# mode; they're all on the same real network namespace regardless of
+# their `network:` value, which is ignored under host mode).
+HOST_NETWORK_GROUP = "__host__"
+
+
+def refresh_peers_host_mode(remote_peers: list[str] | None = None) -> Path:
+    """Regenerate the shared CycloneDDS peers file for host-mode containers.
+
+    No Docker network to introspect for peer container names -- every
+    host-mode container already shares this machine's real loopback, so
+    `127.0.0.1` alone covers same-host discovery.
+    """
+    host_path = cyclonedds_host_path(HOST_NETWORK_GROUP)
+    host_path.write_text(render_cyclonedds_xml(["127.0.0.1"], remote_peers))
     return host_path

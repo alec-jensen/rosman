@@ -179,6 +179,51 @@ def test_remote_peers_rejects_non_string_list(tmp_path: Path):
         parse_config(text, path)
 
 
+def test_network_mode_defaults_to_auto(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    config = parse_config(MINIMAL, path)
+    assert config.network_mode == "auto"
+
+
+def test_network_mode_accepts_host_and_bridge(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    assert parse_config("ros_distro: humble\nnetwork_mode: host\n", path).network_mode == "host"
+    assert (
+        parse_config("ros_distro: humble\nnetwork_mode: bridge\n", path).network_mode == "bridge"
+    )
+
+
+def test_network_mode_rejects_unknown_value(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    with pytest.raises(ConfigError, match="network_mode"):
+        parse_config("ros_distro: humble\nnetwork_mode: nope\n", path)
+
+
+def test_ports_defaults_to_empty(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    config = parse_config(MINIMAL, path)
+    assert config.ports == []
+
+
+def test_ports_accepts_bare_and_mapped_entries(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    text = 'ros_distro: humble\nports: ["10000:10000", "8080"]\n'
+    config = parse_config(text, path)
+    assert config.ports == ["10000:10000", "8080"]
+
+
+def test_ports_rejects_non_numeric_entries(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    with pytest.raises(ConfigError, match="ports"):
+        parse_config('ros_distro: humble\nports: ["abc"]\n', path)
+
+
+def test_ports_rejects_too_many_colons(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    with pytest.raises(ConfigError, match="ports"):
+        parse_config('ros_distro: humble\nports: ["1:2:3"]\n', path)
+
+
 def test_missing_required_field(tmp_path: Path):
     path = tmp_path / "rosman.yml"
     with pytest.raises(ConfigError, match="ros_distro"):

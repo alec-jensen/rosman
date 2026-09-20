@@ -99,7 +99,8 @@ source](#building-packages-from-source-rosdep--rosmanlock) below.
 ros_distro: humble          # required -- any distro with an official ros:<tag> image
 rmw_implementation: cyclonedds  # default; cyclonedds is the only supported path today
 domain_id: auto               # "auto" = rosman assigns and persists one per project; or an explicit int
-network: default              # named Docker network group -- projects sharing a network can discover each other
+network: default              # bridge-mode network group name -- ignored under host networking
+network_mode: auto            # "auto" (host on Linux, bridge on Windows), "host", or "bridge"
 gpu: false                    # true enables nvidia-container-toolkit passthrough
 devices: []                   # e.g. ["/dev/ttyUSB0"]
 workspace_dir: .              # path (relative to this file) mounted as the container's workspace root
@@ -109,6 +110,7 @@ base_image: null              # optional -- override the default `ros:<distro>` 
 setup_script: null            # optional -- path to a shell script rosman runs during the image build
 registry_image: null          # optional -- share one built image across a team; see below
 remote_peers: []              # optional -- LAN IPs of other machines' rosman containers; see below
+ports: []                     # optional -- e.g. ["10000:10000"]; bridge mode only, see below
 ```
 
 ### Per-machine overrides: `rosman.local.yml`
@@ -200,6 +202,34 @@ fixed internal identity, not whoever built it — each machine's actual
 host UID/GID is applied at container runtime, so bind-mounted files still
 come out correctly owned regardless of who built the shared image.
 
+### Networking: `network_mode` & `ports`
+
+```yaml
+network_mode: auto   # "auto" (default), "host", or "bridge"
+ports: []             # bridge mode only, e.g. ["10000:10000"]
+```
+
+`auto` resolves to **host networking on Linux** (including WSL2 — real,
+fully reliable Linux host networking, no VM boundary involved) and
+**bridge networking on Windows** (Docker Desktop's host networking there
+still has documented reliability issues as of 2026). Override either
+direction with an explicit `host`/`bridge` value.
+
+Under host networking, every container port already *is* the host's port
+— nothing to publish, nothing to configure, and a TCP service inside the
+container (a rosbridge/`ros_tcp_endpoint`-style bridge for Unity/web
+clients, for example) is reachable at `localhost:<port>` from the host
+with zero extra config, as long as it binds `0.0.0.0` rather than
+`127.0.0.1` inside the container. The one tradeoff, inherent to host
+networking generally: two *different* rosman workspaces on the same
+machine can't both bind the same fixed port at once, exactly like two
+native processes competing for a port.
+
+Under bridge networking (Windows by default, or anywhere via
+`network_mode: bridge`), use `ports:` for the same TCP-service case —
+Docker Compose-style, `["host_port:container_port"]` or a bare
+`["port"]` for the same port on both sides.
+
 ### Multi-host (LAN)
 
 For talking to a real robot on the same network — no VPN, LAN only:
@@ -210,12 +240,14 @@ remote_peers: ["192.168.1.51"]       # LAN IP(s) of the other machine(s)
 ```
 
 Run `rosman doctor` on each machine to see the address to put in the
-others' `remote_peers`, and the UDP port range that needs to be reachable
-between them (rosman publishes it automatically; a firewall in between is
-the usual reason it doesn't work). `domain_id` must be an explicit,
-matching integer on every machine — `"auto"` is assigned independently per
-machine and won't line up across hosts, so rosman rejects it outright when
-`remote_peers` is set rather than failing silently at discovery time.
+others' `remote_peers`, and (bridge mode only) the UDP port range that
+needs to be reachable between them (rosman publishes it automatically; a
+firewall in between is the usual reason it doesn't work). Under host
+networking, there's nothing to publish — the port is already the host's.
+`domain_id` must be an explicit, matching integer on every machine —
+`"auto"` is assigned independently per machine and won't line up across
+hosts, so rosman rejects it outright when `remote_peers` is set rather
+than failing silently at discovery time.
 
 ## Shell tab-completion
 
@@ -232,10 +264,14 @@ already running (`rosman up`); pressing Tab never starts one.
 
 ## Design decisions
 
-- **Bridge network + CycloneDDS unicast peers, not `--network host`.**
-  Host networking is unreliable on Windows Docker Desktop, so rosman
-  standardizes on Cyclone DDS with explicit unicast peer discovery. See
-  [`src/rosman/networking.py`](src/rosman/networking.py).
+- **Host networking on Linux by default, bridge on Windows.** Real
+  `--network host` is fully reliable on Linux (including WSL2) and needs
+  no port publishing at all; Docker Desktop's host networking on Windows
+  still has documented reliability issues as of 2026, so Windows defaults
+  to a per-workspace bridge network with explicit CycloneDDS unicast peers
+  instead. Override either direction with `network_mode:`. See
+  [`src/rosman/networking.py`](src/rosman/networking.py) and
+  [Networking](#networking-network_mode--ports) below.
 - **One persistent container per workspace.** `rosman up` starts it once;
   every other `rosman <command>` is a `docker exec` into that same
   container.
@@ -253,6 +289,10 @@ See [`docs/spec.md`](docs/spec.md) for the full design spec, and
   only completes at the end of the line (no mid-line editing).
 - Multi-host discovery is LAN-only (`remote_peers`); there's no VPN mesh
   integration for reaching a machine that isn't on the same network.
+- Under host networking (the Linux default), two different rosman
+  workspaces on the same machine can't both bind the same fixed TCP port
+  at once — the same tradeoff two native processes on that machine would
+  have. Not something rosman tries to prevent.
 - ROS 2 only, no ROS 1.
 - rosman wires up GPU/X11 *plumbing* but doesn't install GUI packages
   (rviz2, rqt, Gazebo) — add them via `extra_apt_packages`.

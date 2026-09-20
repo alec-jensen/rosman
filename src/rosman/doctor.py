@@ -23,7 +23,7 @@ from docker.errors import APIError, NotFound
 from rosman.config import RosmanConfig
 from rosman.docker_client import DOMAIN_ID_LABEL, MANAGED_LABEL, NETWORK_GROUP_LABEL, get_client
 from rosman.errors import RosmanError
-from rosman.lifecycle import ContainerManager, compute_config_hash
+from rosman.lifecycle import ContainerManager, compute_config_hash, resolve_network_mode
 from rosman.networking import (
     CYCLONEDDS_CONTAINER_PATH,
     RMW_IMPLEMENTATION_ENV,
@@ -31,6 +31,7 @@ from rosman.networking import (
     detect_lan_ip,
     ensure_network,
     refresh_peers,
+    refresh_peers_host_mode,
 )
 from rosman.platform_support import is_wsl2
 from rosman.state import RosmanState
@@ -80,6 +81,12 @@ def run_checks(config: RosmanConfig, network_check: bool = False) -> list[Check]
         return checks
 
     checks.append(Check("config", True, f"{config.config_path} parsed OK"))
+
+    network_mode = resolve_network_mode(config)
+    mode_detail = network_mode
+    if config.network_mode == "auto":
+        mode_detail += " (auto-detected; set network_mode explicitly to override)"
+    checks.append(Check("network mode", True, mode_detail))
 
     config_hash = compute_config_hash(config)
     checks.append(Check("config hash", True, config_hash))
@@ -170,6 +177,7 @@ def run_network_roundtrip(
     """
     domain_id = manager.resolve_domain_id(config)
     group = config.network
+    network_mode = resolve_network_mode(config)
     a_name = f"rosman-doctor-{group}-a"
     b_name = f"rosman-doctor-{group}-b"
 
@@ -183,14 +191,20 @@ def run_network_roundtrip(
     except RosmanError as exc:
         return Check("networking round-trip", False, f"could not build/find image: {exc}")
 
-    ensure_network(client, group)
+    if network_mode != "host":
+        ensure_network(client, group)
     for name in (a_name, b_name):
         try:
             client.containers.get(name).remove(force=True)
         except NotFound:
             pass
 
-    cyclonedds_path = refresh_peers(client, group)
+    # Test whichever mode the real workspace container would actually use
+    # (see lifecycle.resolve_network_mode) -- a bridge-mode round trip
+    # wouldn't prove anything about a host-mode workspace, and vice versa.
+    cyclonedds_path = (
+        refresh_peers_host_mode() if network_mode == "host" else refresh_peers(client, group)
+    )
     environment = {
         "RMW_IMPLEMENTATION": RMW_IMPLEMENTATION_ENV,
         "ROS_DOMAIN_ID": str(domain_id),
@@ -210,12 +224,16 @@ def run_network_roundtrip(
                 environment=environment,
                 volumes=volumes,
                 labels=labels,
-                network=ensure_network(client, group).name,
+                network=None if network_mode == "host" else ensure_network(client, group).name,
+                network_mode="host" if network_mode == "host" else None,
             )
             containers.append(c)
             c.start()
 
-        refresh_peers(client, group)
+        if network_mode == "host":
+            refresh_peers_host_mode()
+        else:
+            refresh_peers(client, group)
         talker, listener = containers
 
         pub_cmd = (
@@ -248,4 +266,7 @@ def run_network_roundtrip(
                 c.remove(force=True)
             except NotFound:
                 pass
-        refresh_peers(client, group)
+        if network_mode == "host":
+            refresh_peers_host_mode()
+        else:
+            refresh_peers(client, group)
