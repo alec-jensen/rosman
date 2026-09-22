@@ -17,12 +17,12 @@ chowned to a specific UID at build time are instead made world-writable.
 
 from __future__ import annotations
 
-import hashlib
+import json
 import os
-import platform
 import re
 import shutil
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,13 +31,14 @@ from docker.errors import APIError, ImageNotFound, NotFound
 from docker.types import DeviceRequest
 
 from rosman.config import RosmanConfig
-from rosman.docker_client import (
+from rosman.docker_labels import (
     CONFIG_HASH_LABEL,
     DISTRO_LABEL,
     DOMAIN_ID_LABEL,
     MANAGED_LABEL,
     NETWORK_GROUP_LABEL,
     NETWORK_MODE_LABEL,
+    REMOTE_PEERS_LABEL,
     RESTART_POLICY_LABEL,
     WORKSPACE_LABEL,
 )
@@ -53,6 +54,7 @@ from rosman.networking import (
 )
 from rosman.platform_support import gui_passthrough
 from rosman.progress import DockerStreamError, NullReporter, ProgressReporter
+from rosman.runtime_config import compute_config_hash, resolve_network_mode
 from rosman.state import RosmanState, state_dir
 
 CONTAINER_WORKSPACE_PATH = "/workspace"
@@ -79,14 +81,6 @@ IMAGE_GID = 1000
 # be missing one, e.g. `plugdev`, so the build creates whichever are absent
 # rather than assuming every base image already has them).
 DEVICE_GROUPS = ["dialout", "video", "audio", "plugdev", "disk", "tty", "uucp"]
-
-# Bump whenever render_dockerfile changes in a way that affects the built
-# image (a new apt package, a fixed bug like the /etc/profile.d ROS sourcing
-# fix). Config-hash inputs otherwise only cover *user-facing* rosman.yml
-# fields, so without this a rosman upgrade that fixes something in the
-# template would silently leave existing users on their old, buggy cached
-# image forever -- `rosman up` would just find the old tag and reuse it.
-DOCKERFILE_TEMPLATE_VERSION = 8
 
 # Ubuntu codename ROS 2 apt packages are published under for each distro, used
 # only when `base_image` overrides the default `ros:<distro>` image and rosman
@@ -117,21 +111,6 @@ def host_uid_gid() -> tuple[int, int]:
     return 1000, 1000
 
 
-def resolve_network_mode(config: RosmanConfig) -> str:
-    """`network_mode: auto` resolves to "host" on Linux (including WSL2,
-    which reports `platform.system() == "Linux"` -- it's a real Linux
-    kernel, so host networking there is exactly as reliable as native
-    Linux) and "bridge" everywhere else. As of 2026, Docker Desktop's own
-    host-networking support on native Windows still has real, current,
-    documented issues (see spec.md's sixth addendum) -- this is a live
-    fact worth rechecking if revisiting this default, not a permanent one.
-    `network_mode: host`/`bridge` in rosman.yml force one or the other
-    regardless of platform."""
-    if config.network_mode == "auto":
-        return "host" if platform.system() == "Linux" else "bridge"
-    return config.network_mode
-
-
 def _parse_port_spec(spec: str) -> tuple[str, int]:
     """"10000:10000" -> ("10000/tcp", 10000); "10000" -> ("10000/tcp", 10000)."""
     parts = spec.split(":")
@@ -155,46 +134,6 @@ def resolve_ports(config: RosmanConfig, domain_id: int) -> dict[str, int] | None
         for port in dds_port_range(domain_id):
             ports[f"{port}/udp"] = port
     return ports or None
-
-
-def _setup_script_digest(config: RosmanConfig) -> str:
-    """Hash of the setup script's *contents*, not just its path, so editing
-    the script (e.g. bumping a ZED SDK installer version) is picked up as
-    config drift and triggers a rebuild -- not just renaming/removing it."""
-    if not config.setup_script:
-        return ""
-    script_path = (config.project_root / config.setup_script).resolve()
-    try:
-        return hashlib.sha256(script_path.read_bytes()).hexdigest()
-    except OSError:
-        return f"MISSING:{config.setup_script}"
-
-
-def compute_config_hash(config: RosmanConfig) -> str:
-    """Hash of everything that affects the built image. Used both as the
-    image tag and as a container label, so `rosman status`/drift detection
-    can tell whether a running container matches the current rosman.yml
-    without re-parsing anything.
-
-    Deliberately does *not* include the host UID/GID: the image bakes in a
-    fixed identity (IMAGE_UID/IMAGE_GID) regardless of who builds it, so two
-    teammates with different host UIDs building the same rosman.yml still
-    get the same hash/tag -- required for `registry_image` sharing to mean
-    anything (a tag that changed per-builder couldn't be shared at all)."""
-    payload = "|".join(
-        [
-            str(DOCKERFILE_TEMPLATE_VERSION),
-            config.ros_distro,
-            config.rmw_implementation,
-            ",".join(sorted(config.extra_apt_packages)),
-            ",".join(sorted(config.locked_apt_packages)),
-            ",".join(sorted(config.locked_pip_packages)),
-            config.base_image or "",
-            config.setup_script or "",
-            _setup_script_digest(config),
-        ]
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
 
 def _render_ros_install_block(config: RosmanConfig) -> str:
@@ -270,8 +209,14 @@ def render_dockerfile(config: RosmanConfig) -> str:
     # source (rosdep-resolved vs. hand-listed), deduped since a package
     # could plausibly appear in both.
     all_packages = sorted(set(config.extra_apt_packages) | set(config.locked_apt_packages))
-    extra_packages = " ".join(all_packages)
-    install_extra = f" {extra_packages}" if extra_packages else ""
+    project_packages_block = ""
+    if all_packages:
+        project_packages_block = (
+            "RUN apt-get update \\\n"
+            "    && apt-get install -y --no-install-recommends "
+            + " ".join(all_packages)
+            + " \\\n    && rm -rf /var/lib/apt/lists/*\n"
+        )
     ros_install_block = _render_ros_install_block(config)
 
     # Built as plain Python strings (not inline in the Dockerfile f-string
@@ -337,13 +282,12 @@ RUN (getent group {IMAGE_GID} || groupadd --gid {IMAGE_GID} {DEFAULT_USERNAME}) 
     && apt-get update \\
     && apt-get install -y --no-install-recommends \\
         sudo python3-colcon-common-extensions python3-rosdep python3-pip \\
-        ros-{config.ros_distro}-rmw-cyclonedds-cpp{install_extra} \\
+        ros-{config.ros_distro}-rmw-cyclonedds-cpp \\
     && echo "ALL ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/rosman \\
     && chmod 0440 /etc/sudoers.d/rosman \\
     && rm -rf /var/lib/apt/lists/* \\
     && (rosdep init || true) \\
     && su -l {DEFAULT_USERNAME} -c "rosdep update"
-{pip_install_block}
 # Everything below is world-writable/-readable rather than owned by a
 # specific UID: the image's baked identity ({IMAGE_UID}:{IMAGE_GID}) is
 # deliberately not tied to whichever host UID actually runs the container
@@ -380,8 +324,10 @@ RUN printf '%s\\n' \\
         "{ws_profile_line}" \\
         > /etc/profile.d/rosman-ros.sh \\
     && chmod +x /etc/profile.d/rosman-ros.sh
-{setup_block}
 {entrypoint_block}
+{project_packages_block}
+{pip_install_block}
+{setup_block}
 WORKDIR {CONTAINER_WORKSPACE_PATH}
 ENTRYPOINT ["{ENTRYPOINT_CONTAINER_PATH}"]
 """
@@ -524,11 +470,14 @@ class ContainerManager:
                 DISTRO_LABEL: config.ros_distro,
                 CONFIG_HASH_LABEL: config_hash,
             }
+            started = time.perf_counter()
+            build_succeeded = False
             try:
                 build_stream = self.client.api.build(
                     path=str(build_dir), tag=tag, rm=True, decode=True, labels=image_labels
                 )
                 reporter.build(build_stream)
+                build_succeeded = True
             except (APIError, DockerStreamError) as exc:
                 base = config.base_image or f"ros:{config.ros_distro}"
                 raise ContainerError(
@@ -536,6 +485,8 @@ class ContainerManager:
                     f"Check that '{base}' is a valid image and, if set, that "
                     f"setup_script '{config.setup_script}' runs cleanly."
                 ) from exc
+            finally:
+                reporter.build_finished(time.perf_counter() - started, build_succeeded)
         return ImageResult(tag=tag, source="built")
 
     def push_image(
@@ -691,6 +642,7 @@ class ContainerManager:
             NETWORK_MODE_LABEL: network_mode,
             DOMAIN_ID_LABEL: str(domain_id),
             RESTART_POLICY_LABEL: config.restart_policy,
+            REMOTE_PEERS_LABEL: json.dumps(config.remote_peers, separators=(",", ":")),
         }
 
         container = self.client.containers.create(
@@ -742,6 +694,10 @@ class ContainerManager:
         container.reload()
         if container.status != "running":
             container.start()
+        if resolve_network_mode(config) == "host":
+            refresh_peers_host_mode(config.remote_peers)
+        else:
+            refresh_peers(self.client, config.network, config.remote_peers)
         return container, False
 
     # -- stop / remove -------------------------------------------------

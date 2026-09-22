@@ -1,4 +1,5 @@
 import json
+import subprocess
 import urllib.error
 from datetime import timedelta
 from pathlib import Path
@@ -11,6 +12,8 @@ from rosman.update_check import (
     _now,
     check_for_update,
     pending_notice,
+    run_scheduled_update_check,
+    schedule_update_check,
 )
 
 
@@ -108,3 +111,53 @@ def test_pending_notice_fires_again_after_interval_elapses(tmp_path: Path):
     state.update_check.last_notified = (_now() - NOTIFY_INTERVAL - timedelta(seconds=1)).isoformat()
 
     assert pending_notice(state, "0.1.0") is not None
+
+
+def test_schedule_update_check_spawns_detached_worker_when_due(tmp_path: Path):
+    state = make_state(tmp_path)
+    with patch("subprocess.Popen") as popen:
+        schedule_update_check(state)
+
+    saved = RosmanState.load(state.path)
+    assert saved.update_check.last_checked is not None
+    command = popen.call_args.args[0]
+    assert "__check_update" in command
+    assert str(state.path) in command
+    assert popen.call_args.kwargs["stdout"] == subprocess.DEVNULL
+
+
+def test_schedule_update_check_does_not_spawn_when_not_due(tmp_path: Path):
+    state = make_state(tmp_path)
+    state.update_check.last_checked = _now().isoformat()
+    with patch("subprocess.Popen") as popen:
+        schedule_update_check(state)
+    popen.assert_not_called()
+
+
+def test_scheduled_worker_refreshes_cache_even_after_parent_marked_attempt(tmp_path: Path):
+    state = make_state(tmp_path)
+    state.update_check.last_checked = _now().isoformat()
+    state.save()
+    with patch("urllib.request.urlopen", return_value=fake_response("v0.4.3")):
+        run_scheduled_update_check(state.path)
+    assert RosmanState.load(state.path).update_check.latest_version == "0.4.3"
+
+
+def test_scheduled_worker_keeps_state_changes_made_during_fetch(tmp_path: Path):
+    state = make_state(tmp_path)
+    state.save()
+
+    def update_state_during_fetch(*args, **kwargs):
+        concurrent = RosmanState.load(state.path)
+        concurrent.assign_domain_id(tmp_path / "workspace")
+        concurrent.update_check.last_notified = _now().isoformat()
+        concurrent.save()
+        return fake_response("v0.4.3")
+
+    with patch("urllib.request.urlopen", side_effect=update_state_during_fetch):
+        run_scheduled_update_check(state.path)
+
+    saved = RosmanState.load(state.path)
+    assert saved.update_check.latest_version == "0.4.3"
+    assert saved.update_check.last_notified is not None
+    assert saved.get_project(tmp_path / "workspace").domain_id is not None

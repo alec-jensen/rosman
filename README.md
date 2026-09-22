@@ -55,15 +55,16 @@ sudo pacman -Sy rosman
 `apt upgrade`/`dnf upgrade`/`pacman -Syu` pick up new releases
 automatically. Windows package manager support isn't available yet — on
 Windows, or not on apt/dnf/pacman, install from source below, or grab a
-raw binary/wheel from a [GitHub release](https://github.com/alec-jensen/rosman/releases).
+standalone Linux bundle/wheel from a
+[GitHub release](https://github.com/alec-jensen/rosman/releases).
 
 `rosman` also checks for updates in the background (at most once a day)
 and prints a one-line notice when one's available — it never blocks,
 fails, or interrupts scripted/CI usage.
 
-The apt/dnf/pacman packages also install a man page — `man rosman` —
-generated directly from rosman's own CLI parser, so it can't drift from
-`--help`.
+The apt/dnf/pacman packages also install `man rosman` and register bash/zsh
+tab-completion automatically. Both are generated from rosman's source so
+they stay in sync with `--help` and the CLI.
 
 ### From source
 
@@ -77,8 +78,7 @@ uv run rosman --help
 ```sh
 cd my-ros2-project
 rosman init --distro humble    # writes rosman.yml
-rosman up                      # builds the image and starts the workspace container
-rosman topic list               # forwarded to `ros2 topic list` inside the container
+rosman topic list               # auto-builds/starts the container, then runs `ros2 topic list`
 rosman colcon build              # forwarded to `colcon build` inside the container
 rosman rosdep install            # resolve + install src/ packages' apt deps, and lock them
 rosman shell                    # interactive shell in the container
@@ -89,7 +89,7 @@ rosman doctor --fix             # + auto-rebuild if config has drifted
 rosman config                   # show the fully resolved effective config (domain_id, network_mode, image tag, ...)
 rosman prune                    # remove rosman-built images no longer used by any container
 rosman push                     # build (if needed) and push the image to registry_image, for your team
-rosman down                     # stop the container (rosman up starts it again)
+rosman down                     # stop the container (the next ROS command starts it again)
 ```
 
 Anything that isn't one of rosman's own subcommands (`init`, `up`, `down`,
@@ -97,6 +97,8 @@ Anything that isn't one of rosman's own subcommands (`init`, `up`, `down`,
 `completion`, `help`) is forwarded verbatim as `ros2 <args>` (or `colcon
 <args>`/`rosdep <args>` if the first word is `colcon`/`rosdep`) inside the
 workspace container — rosman does not reimplement the `ros2` CLI.
+`rosman up` is available if you want to prepare the container before running
+a command. Image builds report their elapsed time when they finish or fail.
 `rosdep install` specifically is the one exception: see [Building packages
 from source](#building-packages-from-source-rosdep--rosmanlock) below.
 
@@ -269,6 +271,13 @@ hosts, so rosman rejects it outright when `remote_peers` is set rather
 than failing silently at discovery time.
 
 ## Shell tab-completion
+
+apt/dnf/pacman installs register completion automatically. Restart the shell
+after installing or upgrading; remove any older
+`eval "$(rosman completion ...)"` line from your shell rc file because it is
+no longer needed.
+
+For source/wheel installs, add the hook manually:
 
 ```sh
 echo 'eval "$(rosman completion bash)"' >> ~/.bashrc   # or: completion zsh >> ~/.zshrc

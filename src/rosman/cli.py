@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -24,7 +25,7 @@ from rosman.dispatch import RESERVED_COMMANDS, dispatch_passthrough, shell_comma
 from rosman.errors import RosmanError
 from rosman.progress import RichReporter
 from rosman.state import RosmanState
-from rosman.update_check import check_for_update, pending_notice
+from rosman.update_check import pending_notice, schedule_update_check
 
 if TYPE_CHECKING:
     # Deferred at runtime -- see main()'s `__complete` fast path, which
@@ -45,8 +46,8 @@ gpu: false                    # true enables nvidia-container-toolkit passthroug
 devices: []                   # e.g. ["/dev/ttyUSB0"]
 workspace_dir: .              # path (relative to this file) mounted as the container workspace root
 extra_apt_packages: []        # optional list, installed into the image on first build
-restart_policy: "no"          # docker restart policy; "no" (default) requires explicit `rosman up`
-                               # after a host reboot -- see docs/spec.md #6 for why
+restart_policy: "no"          # do not auto-start with Docker after a reboot;
+                               # the next rosman command starts this workspace on demand
 
 # Per-machine overrides (e.g. a device that's at a different path on your
 # machine) go in a gitignored rosman.local.yml next to this file -- any
@@ -165,12 +166,12 @@ def cmd_down(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    from rosman.docker_client import (
+    from rosman.docker_client import get_client
+    from rosman.docker_labels import (
         DISTRO_LABEL,
         DOMAIN_ID_LABEL,
         NETWORK_GROUP_LABEL,
         WORKSPACE_LABEL,
-        get_client,
     )
     from rosman.lifecycle import ContainerManager
 
@@ -415,7 +416,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     config = _load_config_or_exit()
     if args.fix:
         _fix_config_drift(config)
-    checks = run_checks(config, network_check=args.network_check)
+    checks = run_checks(
+        config,
+        network_check=args.network_check,
+        reporter=RichReporter(console) if args.network_check else None,
+    )
     ok = True
     for check in checks:
         icon = "[green]OK[/green]  " if check.ok else "[red]FAIL[/red]"
@@ -480,6 +485,13 @@ def _ensure_running_with_notice(manager: ContainerManager, config: RosmanConfig)
 
     if container.status != "running":
         container.start()
+    from rosman.networking import refresh_peers, refresh_peers_host_mode
+    from rosman.runtime_config import resolve_network_mode
+
+    if resolve_network_mode(config) == "host":
+        refresh_peers_host_mode(config.remote_peers)
+    else:
+        refresh_peers(manager.client, config.network, config.remote_peers)
     return container, False
 
 
@@ -706,12 +718,34 @@ def _maybe_show_update_notice() -> None:
         if not sys.stderr.isatty():
             return
         state = RosmanState.load()
-        check_for_update(state)
         notice = pending_notice(state, __version__)
         if notice:
             err_console.print(f"[yellow]{notice}[/yellow]")
+        schedule_update_check(state)
     except Exception:
         pass
+
+
+def _run_command(command: Callable[[], int]) -> int:
+    """Run one dispatched command with user-facing error handling.
+
+    docker-py costs roughly 70ms to import on this machine. Import its
+    exception class only after a non-rosman exception actually occurs;
+    Docker-backed commands already import it through their own work, while
+    `help`, `init`, and manual completion setup stay Docker-free.
+    """
+    try:
+        return command()
+    except RosmanError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        return 1
+    except Exception as exc:
+        from docker.errors import DockerException
+
+        if isinstance(exc, DockerException):
+            err_console.print(f"[red]Docker error:[/red] {exc}")
+            return 1
+        raise
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -737,31 +771,15 @@ def main(argv: list[str] | None = None) -> int:
     if not (argv and argv[0] == "completion"):
         _maybe_show_update_notice()
 
-    from docker.errors import DockerException
-
     if argv[:2] == ["rosdep", "install"]:
         # The one rosdep subcommand that isn't plain passthrough -- see
         # rosdep.py's module docstring. Every other `rosman rosdep <...>`
         # falls through to the generic passthrough branch below, exactly
         # like `colcon`.
-        try:
-            return cmd_rosdep_install(argv[2:])
-        except RosmanError as exc:
-            err_console.print(f"[red]{exc}[/red]")
-            return 1
-        except DockerException as exc:
-            err_console.print(f"[red]Docker error:[/red] {exc}")
-            return 1
+        return _run_command(lambda: cmd_rosdep_install(argv[2:]))
 
     if argv and argv[0] not in RESERVED_COMMANDS and not argv[0].startswith("-"):
-        try:
-            return cmd_passthrough(argv)
-        except RosmanError as exc:
-            err_console.print(f"[red]{exc}[/red]")
-            return 1
-        except DockerException as exc:
-            err_console.print(f"[red]Docker error:[/red] {exc}")
-            return 1
+        return _run_command(lambda: cmd_passthrough(argv))
 
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -769,18 +787,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
     try:
-        return args.func(args)
-    except RosmanError as exc:
-        err_console.print(f"[red]{exc}[/red]")
-        return 1
-    except DockerException as exc:
-        # Safety net: anything from docker-py that a specific code path
-        # didn't already wrap into a clean RosmanError (a name conflict, an
-        # invalid device path, "could not select device driver" for a
-        # missing GPU runtime, etc.) still gets a one-line message instead
-        # of a raw traceback.
-        err_console.print(f"[red]Docker error:[/red] {exc}")
-        return 1
+        return _run_command(lambda: args.func(args))
     except KeyboardInterrupt:
         return 130
 

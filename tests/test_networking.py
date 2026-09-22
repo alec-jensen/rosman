@@ -16,10 +16,23 @@ def test_render_with_no_peers():
     assert "AllowMulticast>false" in xml
 
 
+def test_render_uses_default_interface_selection_for_older_cyclonedds():
+    xml = render_cyclonedds_xml(["rosman-a-1234"])
+    root = ET.fromstring(xml)
+    domain = root.find("{https://cdds.io/config}Domain")
+
+    assert domain is not None
+    assert domain.get("Id") == "any"
+    general = domain.find("{https://cdds.io/config}General")
+    assert general is not None
+    assert general.find("{https://cdds.io/config}Interfaces") is None
+    assert general.find("{https://cdds.io/config}NetworkInterfaceAddress") is None
+
+
 def test_render_with_peers_includes_each_as_an_element():
     xml = render_cyclonedds_xml(["rosman-a-1234", "rosman-b-5678"])
-    assert '<Peer address="rosman-a-1234" />' in xml
-    assert '<Peer address="rosman-b-5678" />' in xml
+    assert '<Peer Address="rosman-a-1234" />' in xml
+    assert '<Peer Address="rosman-b-5678" />' in xml
 
 
 def test_render_produces_well_formed_xml_for_odd_peer_names():
@@ -30,13 +43,13 @@ def test_render_produces_well_formed_xml_for_odd_peer_names():
     xml = render_cyclonedds_xml([odd_name])
     root = ET.fromstring(xml)
     peers = root.findall(".//{https://cdds.io/config}Peer")
-    assert [p.get("address") for p in peers] == [odd_name]
+    assert [p.get("Address") for p in peers] == [odd_name]
 
 
 def test_render_includes_remote_peers_alongside_local_ones():
     xml = render_cyclonedds_xml(["rosman-a-1234"], ["192.168.1.51"])
-    assert '<Peer address="rosman-a-1234" />' in xml
-    assert '<Peer address="192.168.1.51" />' in xml
+    assert '<Peer Address="rosman-a-1234" />' in xml
+    assert '<Peer Address="192.168.1.51" />' in xml
 
 
 def test_render_with_only_remote_peers():
@@ -99,7 +112,7 @@ def test_refresh_peers_host_mode_uses_loopback(tmp_path: Path, monkeypatch):
     path = refresh_peers_host_mode()
 
     xml = path.read_text()
-    assert '<Peer address="127.0.0.1" />' in xml
+    assert '<Peer Address="127.0.0.1" />' in xml
 
 
 def test_refresh_peers_host_mode_includes_remote_peers(tmp_path: Path, monkeypatch):
@@ -108,5 +121,5 @@ def test_refresh_peers_host_mode_includes_remote_peers(tmp_path: Path, monkeypat
     path = refresh_peers_host_mode(["192.168.1.51"])
 
     xml = path.read_text()
-    assert '<Peer address="127.0.0.1" />' in xml
-    assert '<Peer address="192.168.1.51" />' in xml
+    assert '<Peer Address="127.0.0.1" />' in xml
+    assert '<Peer Address="192.168.1.51" />' in xml

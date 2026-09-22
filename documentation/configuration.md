@@ -34,7 +34,7 @@ ports: []                     # optional -- e.g. ["10000:10000"]; bridge mode on
 | `devices` | `[]` | Host device paths passed through, e.g. `["/dev/ttyUSB0"]`. See [GPU/GUI/devices](guides/gpu-gui-devices.md). |
 | `workspace_dir` | `"."` | Path, relative to `rosman.yml`, mounted as the container's workspace root. |
 | `extra_apt_packages` | `[]` | Installed into the image on first build — the simple case for adding a package. |
-| `restart_policy` | `"no"` | Docker restart policy. Deliberately not `"unless-stopped"` by default — WSL2/Docker Desktop can restart sessions independently of you, and an unexpected already-running container is more confusing than requiring an explicit `rosman up` after a reboot. |
+| `restart_policy` | `"no"` | Docker restart policy. Containers do not restart with Docker after a reboot by default; the next `rosman` command starts the workspace container on demand. |
 | `base_image` | `null` | Override the default `ros:<distro>` base image — see [Custom base images](guides/custom-images.md). |
 | `setup_script` | `null` | A shell script run during the image build, for anything `apt` can't express — see [Custom base images](guides/custom-images.md). |
 | `registry_image` | `null` | Share one built image across a team via `rosman push` — see [Team-shared images](guides/team-images.md). |

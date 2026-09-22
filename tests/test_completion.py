@@ -5,7 +5,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from rosman.completion import BASH_SCRIPT, ZSH_SCRIPT, build_inner_command, complete
+from rosman.completion import (
+    BASH_SCRIPT,
+    PACKAGED_ZSH_SCRIPT,
+    ZSH_SCRIPT,
+    build_inner_command,
+    complete,
+)
 from rosman.config import parse_config
 
 
@@ -54,23 +60,10 @@ def test_complete_returns_empty_for_reserved_words(tmp_path: Path):
     assert result == []
 
 
-def _fake_run(inspect_returncode=0, inspect_stdout="true", exec_stdout=b""):
-    """A `subprocess.run` stand-in that tells apart the `docker inspect`
-    call `complete()` makes first from the `docker exec` relay it makes
-    second, by looking for each subcommand in argv -- both go through the
-    same patched function since `complete()` no longer takes a docker-py
-    client/state to swap out (it's deliberately docker-py-free now, see
-    completion.py's docstring)."""
-
+def _fake_run(returncode=0, exec_stdout=b""):
     def _run(argv, **kwargs):
-        result = MagicMock()
-        if "inspect" in argv:
-            result.returncode = inspect_returncode
-            result.stdout = inspect_stdout
-        else:
-            result.returncode = 0
-            result.stdout = exec_stdout
-        return result
+        assert argv[1] == "exec"
+        return MagicMock(returncode=returncode, stdout=exec_stdout)
 
     return _run
 
@@ -78,7 +71,7 @@ def _fake_run(inspect_returncode=0, inspect_stdout="true", exec_stdout=b""):
 def test_complete_returns_empty_when_no_container(tmp_path: Path, monkeypatch):
     config = make_config(tmp_path)
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/docker")
-    monkeypatch.setattr(subprocess, "run", _fake_run(inspect_returncode=1, inspect_stdout=""))
+    monkeypatch.setattr(subprocess, "run", _fake_run(returncode=1))
 
     result = complete(config, ["topic", "ec"])
     assert result == []
@@ -87,7 +80,7 @@ def test_complete_returns_empty_when_no_container(tmp_path: Path, monkeypatch):
 def test_complete_returns_empty_when_container_not_running(tmp_path: Path, monkeypatch):
     config = make_config(tmp_path)
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/docker")
-    monkeypatch.setattr(subprocess, "run", _fake_run(inspect_stdout="false"))
+    monkeypatch.setattr(subprocess, "run", _fake_run(returncode=1))
 
     result = complete(config, ["topic", "ec"])
     assert result == []
@@ -107,8 +100,6 @@ def test_complete_returns_empty_on_subprocess_error(tmp_path: Path, monkeypatch)
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/docker")
 
     def flaky_run(argv, **kwargs):
-        if "inspect" in argv:
-            return _fake_run()(argv, **kwargs)
         raise subprocess.TimeoutExpired(cmd="docker", timeout=3)
 
     monkeypatch.setattr(subprocess, "run", flaky_run)
@@ -117,7 +108,7 @@ def test_complete_returns_empty_on_subprocess_error(tmp_path: Path, monkeypatch)
     assert result == []
 
 
-def test_complete_returns_empty_on_inspect_error(tmp_path: Path, monkeypatch):
+def test_complete_returns_empty_on_exec_error(tmp_path: Path, monkeypatch):
     config = make_config(tmp_path)
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/docker")
 
@@ -183,3 +174,17 @@ def test_zsh_completion_script_has_no_syntax_errors():
     result = _run_completion_script("zsh", script)
     assert "unrecognized modifier" not in result.stderr
     assert "parse error" not in result.stderr
+
+
+@pytest.mark.skipif(shutil.which("zsh") is None, reason="zsh not on PATH")
+def test_packaged_zsh_completion_has_no_syntax_errors(tmp_path: Path):
+    completion_file = tmp_path / "_rosman"
+    completion_file.write_text(PACKAGED_ZSH_SCRIPT)
+    result = subprocess.run(
+        ["zsh", "-n", str(completion_file)],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr

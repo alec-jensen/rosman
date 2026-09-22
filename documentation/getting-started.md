@@ -49,15 +49,15 @@ and signed with rosman's release GPG key.
 `apt upgrade`/`dnf upgrade`/`pacman -Syu` pick up new releases
 automatically. Windows package manager support isn't available yet — on
 Windows, or if you're not on apt/dnf/pacman, install from source above, or
-grab a raw binary/wheel from a
+grab a standalone Linux bundle/wheel from a
 [GitHub release](https://github.com/alec-jensen/rosman/releases).
 
 You need Docker itself already working (Docker Engine on Linux, Docker
 Desktop on Windows) — rosman drives Docker, it doesn't install it.
 
-The apt/dnf/pacman packages also install a man page (`man rosman`),
-generated directly from rosman's own CLI parser so it can't drift from
-`--help`.
+The apt/dnf/pacman packages also install a man page (`man rosman`) and
+register bash/zsh completion automatically. Both are generated from
+rosman's source so they stay in sync with the CLI.
 
 ## Your first workspace
 
@@ -92,7 +92,8 @@ rosman doctor            # sanity-check your environment
 
 You never have to explicitly start anything — the first `rosman <command>`
 you run builds the image (showing live progress) and starts the container;
-every command after that reuses it. If you do want direct control:
+every command after that reuses it. The image build prints its elapsed time
+when it finishes or fails. If you do want direct control:
 
 ```sh
 rosman up      # start (or create) the container explicitly

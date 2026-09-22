@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
 from rich.console import Console as RichConsole
 
 from rosman.cli import (
@@ -118,7 +119,7 @@ def test_update_notice_prints_when_available():
     with (
         patch("sys.stderr.isatty", return_value=True),
         patch("rosman.cli.RosmanState.load") as mock_load,
-        patch("rosman.cli.check_for_update"),
+        patch("rosman.cli.schedule_update_check"),
         patch("rosman.cli.pending_notice", return_value="a new version exists"),
         patch("rosman.cli.err_console.print") as mock_print,
     ):
@@ -158,6 +159,27 @@ def test_main_still_checks_update_notice_for_a_real_command(monkeypatch):
     assert called == [True]
 
 
+def test_help_path_does_not_import_docker_sdk(monkeypatch):
+    import rosman.cli as cli_mod
+
+    monkeypatch.setattr(cli_mod, "_maybe_show_update_notice", lambda: None)
+    with patch.dict("sys.modules", {"docker": None, "docker.errors": None}):
+        assert cli_mod.main(["help"]) == 0
+
+
+def test_run_command_formats_docker_sdk_errors():
+    from docker.errors import DockerException
+
+    from rosman.cli import _run_command
+
+    def fail() -> int:
+        raise DockerException("daemon failed")
+
+    with patch("rosman.cli.err_console.print") as printed:
+        assert _run_command(fail) == 1
+    assert "Docker error" in printed.call_args.args[0]
+
+
 def _make_manager(drifted: bool, reasons=("ros_distro changed",)):
     manager = MagicMock()
     container = MagicMock()
@@ -167,21 +189,32 @@ def _make_manager(drifted: bool, reasons=("ros_distro changed",)):
     return manager, container
 
 
-def test_ensure_running_no_prompt_when_no_drift():
+@pytest.fixture
+def mock_peer_refresh():
+    with (
+        patch("rosman.networking.refresh_peers") as bridge,
+        patch("rosman.networking.refresh_peers_host_mode") as host,
+    ):
+        yield bridge, host
+
+
+def test_ensure_running_no_prompt_when_no_drift(mock_peer_refresh):
     manager, container = _make_manager(drifted=False)
     with patch("builtins.input") as mock_input:
-        result, created = _ensure_running_with_notice(manager, MagicMock(config_path="x.yml"))
+        result, created = _ensure_running_with_notice(
+            manager, MagicMock(config_path="x.yml", remote_peers=[])
+        )
     mock_input.assert_not_called()
     manager.rebuild.assert_not_called()
     assert result is container
     assert created is False
 
 
-def test_ensure_running_rebuilds_on_yes(tmp_path: Path):
+def test_ensure_running_rebuilds_on_yes(tmp_path: Path, mock_peer_refresh):
     manager, container = _make_manager(drifted=True)
     rebuilt = MagicMock()
     manager.rebuild.return_value = rebuilt
-    config = MagicMock(config_path=tmp_path / "rosman.yml", ros_distro="humble")
+    config = MagicMock(config_path=tmp_path / "rosman.yml", ros_distro="humble", remote_peers=[])
 
     with (
         patch("sys.stdin.isatty", return_value=True),
@@ -193,9 +226,9 @@ def test_ensure_running_rebuilds_on_yes(tmp_path: Path):
     assert result is rebuilt
 
 
-def test_ensure_running_keeps_existing_on_no(tmp_path: Path):
+def test_ensure_running_keeps_existing_on_no(tmp_path: Path, mock_peer_refresh):
     manager, container = _make_manager(drifted=True)
-    config = MagicMock(config_path=tmp_path / "rosman.yml", ros_distro="humble")
+    config = MagicMock(config_path=tmp_path / "rosman.yml", ros_distro="humble", remote_peers=[])
 
     with (
         patch("sys.stdin.isatty", return_value=True),
@@ -207,9 +240,9 @@ def test_ensure_running_keeps_existing_on_no(tmp_path: Path):
     assert result is container
 
 
-def test_ensure_running_skips_prompt_when_not_a_tty(tmp_path: Path):
+def test_ensure_running_skips_prompt_when_not_a_tty(tmp_path: Path, mock_peer_refresh):
     manager, container = _make_manager(drifted=True)
-    config = MagicMock(config_path=tmp_path / "rosman.yml", ros_distro="humble")
+    config = MagicMock(config_path=tmp_path / "rosman.yml", ros_distro="humble", remote_peers=[])
 
     with (
         patch("sys.stdin.isatty", return_value=False),
@@ -222,9 +255,9 @@ def test_ensure_running_skips_prompt_when_not_a_tty(tmp_path: Path):
     assert result is container
 
 
-def test_ensure_running_keeps_existing_on_eof(tmp_path: Path):
+def test_ensure_running_keeps_existing_on_eof(tmp_path: Path, mock_peer_refresh):
     manager, container = _make_manager(drifted=True)
-    config = MagicMock(config_path=tmp_path / "rosman.yml", ros_distro="humble")
+    config = MagicMock(config_path=tmp_path / "rosman.yml", ros_distro="humble", remote_peers=[])
 
     with (
         patch("sys.stdin.isatty", return_value=True),
@@ -234,6 +267,16 @@ def test_ensure_running_keeps_existing_on_eof(tmp_path: Path):
 
     manager.rebuild.assert_not_called()
     assert result is container
+
+
+def test_ensure_running_refreshes_peers_when_remote_list_is_removed(
+    tmp_path: Path, mock_peer_refresh
+):
+    manager, _ = _make_manager(drifted=False)
+    config = make_real_config(tmp_path, "network_mode: host\nremote_peers: []\n")
+    _ensure_running_with_notice(manager, config)
+    _, host = mock_peer_refresh
+    host.assert_called_once_with([])
 
 
 # -- cmd_config ------------------------------------------------------------

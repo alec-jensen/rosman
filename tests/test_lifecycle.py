@@ -77,6 +77,19 @@ def test_render_dockerfile_dedupes_extra_and_locked_packages(tmp_path: Path):
     assert dockerfile.count("ros-humble-example-interfaces") == 1
 
 
+def test_project_package_change_keeps_common_ros_setup_cacheable(tmp_path: Path):
+    plain = render_dockerfile(make_config(tmp_path))
+    with_package = render_dockerfile(make_config(tmp_path, "extra_apt_packages: [curl]\n"))
+    project_step = "RUN apt-get update \\\n    && apt-get install -y --no-install-recommends curl"
+    assert project_step in with_package
+    stable_prefix = with_package.split(project_step)[0]
+    assert plain.startswith(stable_prefix)
+    assert "rosdep update" in stable_prefix
+    assert '\nENTRYPOINT ["' not in stable_prefix
+    assert "/etc/profile.d/rosman-ros.sh" in stable_prefix
+    assert "rosman-entrypoint.sh" in stable_prefix
+
+
 def test_render_dockerfile_sets_noninteractive_before_any_apt_install(tmp_path: Path):
     # Regression test: on a bare Ubuntu base_image (unlike ros:<distro>,
     # which already sets this), installing ca-certificates pulls in tzdata,
@@ -227,6 +240,29 @@ def make_manager(tmp_path: Path, client=None) -> ContainerManager:
     client = client or MagicMock()
     state = RosmanState.load(tmp_path / "state.json")
     return ContainerManager(client, state)
+
+
+@pytest.mark.parametrize("network_mode", ["host", "bridge"])
+def test_ensure_running_refreshes_cyclonedds_for_existing_container(
+    tmp_path: Path, monkeypatch, network_mode: str
+):
+    config = make_config(tmp_path, f"network_mode: {network_mode}\n")
+    manager = make_manager(tmp_path)
+    container = MagicMock(status="running")
+    monkeypatch.setattr(manager, "find_container", lambda config: container)
+    refresh_host = MagicMock()
+    refresh_bridge = MagicMock()
+    monkeypatch.setattr("rosman.lifecycle.refresh_peers_host_mode", refresh_host)
+    monkeypatch.setattr("rosman.lifecycle.refresh_peers", refresh_bridge)
+
+    assert manager.ensure_running(config) == (container, False)
+
+    if network_mode == "host":
+        refresh_host.assert_called_once_with(config.remote_peers)
+        refresh_bridge.assert_not_called()
+    else:
+        refresh_bridge.assert_called_once_with(manager.client, config.network, config.remote_peers)
+        refresh_host.assert_not_called()
 
 
 def test_ensure_image_returns_cached_when_local_image_exists(tmp_path: Path):
@@ -466,6 +502,7 @@ def test_create_container_host_mode_needs_no_port_publishing_or_bridge_network(
     _, kwargs = client.containers.create.call_args
     assert kwargs["ports"] is None
     assert kwargs["network_mode"] == "host"
+    assert kwargs["labels"]["rosman.remote_peers"] == '["192.168.1.51"]'
     client.networks.get.assert_not_called()
     client.networks.create.assert_not_called()
 

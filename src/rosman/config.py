@@ -36,9 +36,8 @@ SUPPORTED_RMW_IMPLEMENTATIONS = {"cyclonedds"}
 
 # Docker restart policies rosman will accept. Spec §6 explicitly warns against
 # defaulting to "unless-stopped" (WSL2/Docker Desktop can restart sessions
-# independently of the user), so the default stays "no" -- an explicit
-# `rosman up` is always required after a host reboot unless a project opts
-# into something else here.
+# independently of the user), so the default stays "no". The first rosman
+# command after a reboot starts the workspace container on demand.
 RESTART_POLICIES = {"no", "unless-stopped", "always", "on-failure"}
 
 REQUIRED_FIELDS = ("ros_distro",)

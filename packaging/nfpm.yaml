@@ -13,10 +13,23 @@ vendor: rosman
 homepage: https://github.com/alec-jensen/rosman
 license: MIT
 contents:
+  # Package-manager installs do not need PyInstaller's single-file
+  # self-extraction. Keep the self-contained runtime in one stable tree and
+  # expose the same command through a symlink instead.
   - src: ./dist/rosman-linux-x86_64
+    dst: /usr/lib/rosman
+    type: tree
+  - src: /usr/lib/rosman/rosman
     dst: /usr/bin/rosman
+    type: symlink
+  - src: ./dist/completions/rosman.bash
+    dst: /usr/share/bash-completion/completions/rosman
     file_info:
-      mode: 0755
+      mode: 0644
+  - src: ./dist/completions/_rosman
+    dst: /usr/share/zsh/site-functions/_rosman
+    file_info:
+      mode: 0644
   - src: ./dist/rosman.1.gz
     dst: /usr/share/man/man1/rosman.1.gz
     file_info:

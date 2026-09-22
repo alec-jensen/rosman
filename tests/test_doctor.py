@@ -31,7 +31,7 @@ class FakeManager:
     def resolve_domain_id(self, config):
         return self.domain_id
 
-    def ensure_image(self, config, config_hash):
+    def ensure_image(self, config, config_hash, reporter=None):
         return ImageResult(tag=self.image, source="built")
 
 

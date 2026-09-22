@@ -973,3 +973,68 @@ live with a real pty (`script -qec`) simulating an actual shell-startup
 eval: `rosman completion bash` now shows no notice even with a synthetic
 "update available" state forced due; an ordinary command (`rosman help`)
 run right after still correctly shows it.
+
+## CLI startup and shell latency (2026-09-22, v0.4.3)
+
+Profiled repeated invocations before choosing an implementation. The
+released PyInstaller one-file executable took roughly 300ms for even
+`rosman --version`; a self-contained directory build took roughly 220ms,
+showing that one-file extraction was a material part of every command.
+Package-manager installs now place that directory under `/usr/lib/rosman`
+and symlink `/usr/bin/rosman` to it. A clean `.deb` install in Ubuntu 22.04
+verified the symlink and bundled runtime layout.
+
+The entry point now handles `--version` before importing the full CLI,
+cutting the source-tree median from roughly 205ms to 18ms. Hidden
+completion requests similarly bypass Rich/argparse/Docker SDK imports.
+
+The more important result is the real warm command path. A running,
+non-drifted workspace now uses one Docker CLI inspect for status plus all
+labels, then execs directly; missing, drifted, or failed cases fall back to
+the complete lifecycle manager. Against a live Humble container, 15-run
+medians for `ros2 topic list` were:
+
+- direct `docker exec`: 510.4ms;
+- released v0.4.2 through rosman: 767.9ms;
+- optimized packaged rosman: 599.9ms.
+
+That cuts rosman's own warm-command overhead from roughly 258ms to 90ms
+(65% less), and total command latency by 22%. Dynamic `topic ec` completion
+fell from 718.8ms to 571.5ms (20%); auto-starting a stopped container and
+running the command fell from 1.72s to 1.55s. Live drift testing confirmed
+that a changed `extra_apt_packages` value exits the fast path, prints the
+normal drift diagnosis, and follows the established rebuild/fallback flow.
+
+apt/dnf/pacman now install static bash and native zsh completion files in
+their standard system paths. This removes the old shell-startup
+`eval "$(rosman completion ...)"` process entirely for package users while
+keeping that command available for source/wheel installs. Both files are
+generated from the same Python constants used by the command, and real
+bash/zsh parser tests cover them.
+
+Finally, the once-daily GitHub release lookup moved to a detached worker.
+The invoking command only reads/writes the tiny local state file and starts
+the worker; the up-to-two-second network timeout no longer sits on the
+critical path. The cached notice is shown by a later command.
+
+Build-time profiling uncovered a separate cache boundary: project apt
+packages were installed before the image's workspace/profile/entrypoint
+setup. Changing one package therefore rebuilt those unchanged layers.
+The generated Dockerfile now places all stable ROS and workspace setup
+first, then project apt/pip packages and the optional setup script. A live
+Humble build with no project apt packages completed in 22.3s; adding `sl`
+completed in 56.9s. The two resulting images shared all 15 layers in the
+no-package image, with one new package layer in the second image. An earlier
+package build took 140.4s while apt was slow; elapsed times are sensitive
+to the apt mirror, so the layer comparison is stronger evidence of cache
+reuse than any one timing. Every actual image build now prints its final
+elapsed time, including on failure.
+
+Dynamic completion now makes one `docker exec` call, relying on Docker's
+own missing/stopped-container error instead of running `docker inspect`
+first. Live `rosman __complete topic ec` returned `echo` from the final
+bundle. In a same-machine 15-run comparison against the installed v0.4.2
+binary, median dynamic completion fell from 1543.5ms to 1130.0ms (27%)
+under the current system load. A changed `remote_peers` list bypasses the
+warm dispatch fast path so the CycloneDDS peer file is refreshed before a
+ROS command runs.

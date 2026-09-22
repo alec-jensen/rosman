@@ -26,7 +26,7 @@ dependencies = [
 ]
 
 [project.scripts]
-rosman = "rosman.cli:main"
+rosman = "rosman.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/alec-jensen/rosman"

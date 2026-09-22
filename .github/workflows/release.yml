@@ -40,10 +40,17 @@ jobs:
         run: uv build
 
       # Built inside ubuntu:22.04 (not on the runner's own glibc) so the
-      # binary runs on Ubuntu 22.04+, Debian 12+, and current Fedora/Arch --
-      # see packaging/build-binary.sh for why this matters.
-      - name: Build standalone Linux binary
-        run: bash packaging/build-binary.sh dist/rosman-linux-x86_64
+      # bundle runs on Ubuntu 22.04+, Debian 12+, and current Fedora/Arch.
+      # onedir avoids onefile's extraction tax on every invocation.
+      - name: Build standalone Linux bundle
+        run: |
+          bash packaging/build-onedir.sh dist/rosman-linux-x86_64
+          tar -C dist -czf dist/rosman-linux-x86_64.tar.gz rosman-linux-x86_64
+
+      # apt/dnf/pacman discover these files directly, so opening a shell no
+      # longer starts `rosman completion ...` just to register completion.
+      - name: Generate shell completion files
+        run: env -u PYTHONPATH uv run python packaging/generate-completions.py dist/completions
 
       # Generated straight from build_parser() (see the script) -- can't
       # drift from --help/completion the way a hand-written page would.
@@ -265,6 +272,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" dist/* \
+          gh release create "${{ github.ref_name }}" \
+            dist/*.whl dist/*.tar.gz dist/*.deb dist/*.rpm \
+            dist/*.pkg.tar.zst dist/*.sig dist/rosman.1.gz \
             --title "rosman ${{ github.ref_name }}" \
             --notes-file /tmp/release-notes.md

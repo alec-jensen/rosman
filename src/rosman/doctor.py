@@ -21,7 +21,8 @@ import docker
 from docker.errors import APIError, NotFound
 
 from rosman.config import RosmanConfig
-from rosman.docker_client import DOMAIN_ID_LABEL, MANAGED_LABEL, NETWORK_GROUP_LABEL, get_client
+from rosman.docker_client import get_client
+from rosman.docker_labels import DOMAIN_ID_LABEL, MANAGED_LABEL, NETWORK_GROUP_LABEL
 from rosman.errors import RosmanError
 from rosman.lifecycle import ContainerManager, compute_config_hash, resolve_network_mode
 from rosman.networking import (
@@ -34,6 +35,7 @@ from rosman.networking import (
     refresh_peers_host_mode,
 )
 from rosman.platform_support import is_wsl2
+from rosman.progress import ProgressReporter
 from rosman.state import RosmanState
 
 ROUNDTRIP_TOPIC = "/rosman_doctor_chatter"
@@ -70,7 +72,11 @@ def _usbipd_hint(device: str) -> str:
     return hint
 
 
-def run_checks(config: RosmanConfig, network_check: bool = False) -> list[Check]:
+def run_checks(
+    config: RosmanConfig,
+    network_check: bool = False,
+    reporter: ProgressReporter | None = None,
+) -> list[Check]:
     checks: list[Check] = []
 
     try:
@@ -152,7 +158,7 @@ def run_checks(config: RosmanConfig, network_check: bool = False) -> list[Check]
             )
 
     if network_check:
-        checks.append(run_network_roundtrip(client, manager, config))
+        checks.append(run_network_roundtrip(client, manager, config, reporter=reporter))
     else:
         checks.append(
             Check(
@@ -167,7 +173,10 @@ def run_checks(config: RosmanConfig, network_check: bool = False) -> list[Check]
 
 
 def run_network_roundtrip(
-    client: docker.DockerClient, manager: ContainerManager, config: RosmanConfig
+    client: docker.DockerClient,
+    manager: ContainerManager,
+    config: RosmanConfig,
+    reporter: ProgressReporter | None = None,
 ) -> Check:
     """Spin up two throwaway containers on the workspace's network group and
     confirm a topic published in one is received in the other, proving the
@@ -187,7 +196,7 @@ def run_network_roundtrip(
     # load against a plain base image that doesn't have it.
     config_hash = compute_config_hash(config)
     try:
-        image = manager.ensure_image(config, config_hash).tag
+        image = manager.ensure_image(config, config_hash, reporter=reporter).tag
     except RosmanError as exc:
         return Check("networking round-trip", False, f"could not build/find image: {exc}")
 

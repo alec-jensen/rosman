@@ -15,9 +15,13 @@ every time," per the actual request this was built for.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from rosman.state import RosmanState
 
@@ -64,6 +68,72 @@ def check_for_update(state: RosmanState) -> None:
     except (urllib.error.URLError, OSError, ValueError, TimeoutError):
         pass
     state.save()
+
+
+def run_scheduled_update_check(path: Path) -> None:
+    """Refresh a state file from the detached worker process.
+
+    The parent records the attempt before launching us, so this deliberately
+    bypasses the due check and only performs the network/cache update.
+    """
+    try:
+        request = urllib.request.Request(
+            RELEASES_API_URL, headers={"Accept": "application/vnd.github+json"}
+        )
+        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            data = json.loads(response.read())
+        tag = data.get("tag_name") or ""
+    except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+        return
+    # A command may have assigned a domain ID or updated the notice while
+    # the network request was in flight. Reload before changing only this
+    # field so the background worker does not overwrite that newer state.
+    state = RosmanState.load(path)
+    state.update_check.latest_version = tag.lstrip("v") or None
+    state.save()
+
+
+def schedule_update_check(state: RosmanState) -> None:
+    """Launch a due network check without delaying the user's command.
+
+    The timestamp is persisted before spawning so several commands started
+    together do not each create a worker. A failed spawn simply means the
+    next attempt happens after the normal interval; update checks are never
+    important enough to affect command execution.
+    """
+    if not _due(state.update_check.last_checked, CHECK_INTERVAL):
+        return
+    state.update_check.last_checked = _now().isoformat()
+    state.save()
+
+    if getattr(sys, "frozen", False):
+        command = [sys.executable, "__check_update", str(state.path)]
+    else:
+        command = [sys.executable, "-m", "rosman", "__check_update", str(state.path)]
+    try:
+        if os.name == "nt":
+            creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
+                subprocess, "DETACHED_PROCESS", 0
+            )
+            subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+                creationflags=creationflags,
+            )
+        else:
+            subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+                start_new_session=True,
+            )
+    except OSError:
+        pass
 
 
 def pending_notice(state: RosmanState, current_version: str) -> str | None:

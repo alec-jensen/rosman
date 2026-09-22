@@ -64,7 +64,7 @@ from xml.sax.saxutils import quoteattr
 import docker
 from docker.errors import NotFound
 
-from rosman.docker_client import MANAGED_LABEL, NETWORK_GROUP_LABEL
+from rosman.docker_labels import MANAGED_LABEL, NETWORK_GROUP_LABEL
 from rosman.naming import network_name
 from rosman.state import state_dir
 
@@ -141,18 +141,17 @@ def peer_container_names(
 def render_cyclonedds_xml(peers: list[str], remote_peers: list[str] | None = None) -> str:
     all_peers = [*peers, *(remote_peers or [])]
     peer_elements = "\n".join(
-        f'        <Peer address={quoteattr(name)} />' for name in all_peers
+        f'        <Peer Address={quoteattr(name)} />' for name in all_peers
     )
     peers_block = (
         f"      <Peers>\n{peer_elements}\n      </Peers>" if all_peers else "      <Peers />"
     )
+    # Let Cyclone DDS choose the interface by default. Its older 0.7/0.8
+    # schemas (Foxy/Galactic) have no <Interfaces> element.
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <CycloneDDS xmlns="https://cdds.io/config">
-  <Domain id="any">
+  <Domain Id="any">
     <General>
-      <Interfaces>
-        <NetworkInterface autodetermine="true" />
-      </Interfaces>
       <AllowMulticast>false</AllowMulticast>
     </General>
     <Discovery>

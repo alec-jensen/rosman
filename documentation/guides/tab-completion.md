@@ -1,5 +1,13 @@
 # Shell tab-completion
 
+The apt/dnf/pacman packages install completion files into bash and zsh's
+standard lookup paths. Restart the shell after installing or upgrading;
+there is no shell-rc line to add. If you configured an older release with
+`eval "$(rosman completion ...)"`, remove that line — leaving it is harmless,
+but starts an unnecessary process on every new shell.
+
+For source or wheel installs, register completion manually:
+
 ```sh
 echo 'eval "$(rosman completion bash)"' >> ~/.bashrc
 # or, for zsh:

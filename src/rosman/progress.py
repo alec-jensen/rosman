@@ -49,6 +49,7 @@ def _raise_on_error(chunk: dict) -> None:
 
 class ProgressReporter(Protocol):
     def build(self, stream: Iterable[dict]) -> None: ...
+    def build_finished(self, elapsed_seconds: float, succeeded: bool) -> None: ...
     def pull(self, stream: Iterable[dict]) -> None: ...
     def push(self, stream: Iterable[dict]) -> None: ...
 
@@ -59,6 +60,9 @@ class NullReporter:
     def build(self, stream: Iterable[dict]) -> None:
         for chunk in stream:
             _raise_on_error(chunk)
+
+    def build_finished(self, elapsed_seconds: float, succeeded: bool) -> None:
+        pass
 
     def pull(self, stream: Iterable[dict]) -> None:
         for chunk in stream:
@@ -92,6 +96,14 @@ class RichReporter:
                 text = (chunk.get("stream") or "").strip()
                 if text:
                     progress.update(task, description=text[:100])
+
+    def build_finished(self, elapsed_seconds: float, succeeded: bool) -> None:
+        message = (
+            f"Image built in {elapsed_seconds:.1f}s."
+            if succeeded
+            else f"Image build failed after {elapsed_seconds:.1f}s."
+        )
+        self._console.print(message)
 
     def pull(self, stream: Iterable[dict]) -> None:
         self._layered(stream, "Pulling")

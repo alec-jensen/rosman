@@ -609,3 +609,12 @@ addendum here follows). Worth remembering: a "non-negotiable" decision is
 non-negotiable relative to the facts that justified it at the time, not
 forever — the right response to "that reasoning might be outdated" is to
 go check, not to assume either that it still holds or that it doesn't.
+
+## Later clarification: startup after a reboot
+
+The `restart_policy: "no"` default still prevents Docker from starting a
+workspace container automatically when Docker itself starts. The later
+auto-start requirement supersedes §6's suggestion that the user must run
+`rosman up` after a reboot: the first `rosman` ROS/colcon command starts the
+workspace container on demand. `rosman up` remains an optional way to
+prepare it in advance.

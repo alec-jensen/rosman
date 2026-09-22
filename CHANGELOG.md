@@ -5,6 +5,37 @@ See [GitHub Releases](https://github.com/alec-jensen/rosman/releases) for
 downloadable artifacts, and [docs/roadmap.md](docs/roadmap.md) for the
 full build/verification history behind each entry.
 
+## v0.4.3 — 2026-09-22
+
+### Performance
+
+- Package-manager installs now use a self-contained PyInstaller directory
+  bundle instead of extracting a one-file bundle on every invocation.
+- `rosman --version` and hidden completion requests bypass the full CLI
+  import path; version checks no longer import Rich or docker-py.
+- Warm passthrough commands validate container status and all drift labels
+  with one `docker inspect`, then exec directly without loading docker-py;
+  stopped matching containers use the same lightweight auto-start path.
+- Tab completion now uses one Docker call per request, without a separate
+  container-status inspection.
+- Image builds keep ROS tooling and workspace setup in shared Docker layers
+  ahead of project apt/pip packages, so dependency changes reuse those layers.
+  Each image build prints its elapsed time when it finishes or fails.
+- Changed or removed `remote_peers` refresh the CycloneDDS config before
+  dispatch instead of leaving the previous peer list in use.
+- The daily GitHub update request runs in a detached worker, so the first
+  command after the 24-hour interval never waits on network I/O.
+- apt/dnf/pacman packages install native bash and zsh completion files;
+  opening a shell no longer runs `rosman completion ...`.
+
+### Changed
+
+- The standalone Linux GitHub artifact is now a `.tar.gz` bundle. Keep the
+  directory together when installing it; package-manager installs remain
+  the recommended path.
+- Existing workspace containers require `rosman rebuild` to pick up the
+  new image layout; rosman reports this as normal config drift.
+
 ## v0.4.2 — 2026-09-22
 
 ### Fixed

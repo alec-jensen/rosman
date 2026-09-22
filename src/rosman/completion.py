@@ -31,12 +31,11 @@ container-running check and the docker exec both run with short timeouts,
 and every failure mode (no config, no container, container not running,
 docker error, timeout) just yields zero candidates rather than an error.
 
-This fires on every keystroke of a passthrough completion, so it
-deliberately avoids importing docker-py (measured: ~100ms just to import
-the `docker` package, dwarfing rosman's own actual logic here) in favor of
-a plain `docker inspect` subprocess call -- see `cli.main`'s early
-`__complete` branch, which keeps this path from pulling in any of cli.py's
-other docker-py-dependent imports either. `ros2`/`colcon`'s own CLI
+This fires on every keystroke of a passthrough completion, so it avoids
+docker-py and goes straight to a single `docker exec`. Docker itself rejects
+a missing or stopped container; an earlier `docker inspect` only added a
+round trip and a race. The entry point also avoids importing the full CLI
+for `__complete`. `ros2`/`colcon`'s own CLI
 startup (~350-450ms, confirmed by measuring it directly) still dominates
 total latency and is outside rosman's control -- native `ros2 <TAB>` has
 the same cost.
@@ -105,13 +104,44 @@ complete -F _rosman_complete rosman
     "__TOOLS__", " ".join(PASSTHROUGH_TOOL_NAMES)
 )
 
+_ZSH_BODY = r"""    local cur=${words[CURRENT]}
+    local -a candidates dynamic args
+    args=("${words[@]:1}")
+
+    dynamic=("${(@f)$(rosman __complete "${args[@]}" 2>/dev/null)}")
+    if (( CURRENT == 2 )); then
+        candidates=(__RESERVED__ __TOOLS__ "${dynamic[@]}")
+    else
+        candidates=("${dynamic[@]}")
+    fi
+
+    # Preserve order while removing the one collision currently possible
+    # at the first word (`doctor` is both rosman's command and ros2's).
+    typeset -U candidates
+    compadd -- "${candidates[@]}"
+""".replace("__RESERVED__", RESERVED_COMMAND_NAMES).replace(
+    "__TOOLS__", " ".join(PASSTHROUGH_TOOL_NAMES)
+)
+
+# Printed for source/wheel installs whose package manager cannot place a
+# completion file in the shell's standard lookup path. Package-manager
+# installs use PACKAGED_ZSH_SCRIPT below and therefore start no rosman
+# process while a new shell is loading.
 ZSH_SCRIPT = (
     """# rosman shell completion -- add to ~/.zshrc:
 #   eval "$(rosman completion zsh)"
-autoload -Uz bashcompinit && bashcompinit
+autoload -Uz compinit && compinit
+_rosman() {
 """
-    + BASH_SCRIPT
+    + _ZSH_BODY
+    + """}
+compdef _rosman rosman
+"""
 )
+
+# zsh autoloads this file as the `_rosman` completion function, so its
+# contents are the function body itself rather than another declaration.
+PACKAGED_ZSH_SCRIPT = "#compdef rosman\n" + _ZSH_BODY.lstrip()
 
 
 def build_inner_command(words: list[str]) -> list[str] | None:
@@ -127,30 +157,6 @@ def build_inner_command(words: list[str]) -> list[str] | None:
     return ["ros2", *words]
 
 
-_INSPECT_TIMEOUT_SECONDS = 2
-
-
-def _running_container_name(config: RosmanConfig, docker_bin: str) -> str | None:
-    """Whether this workspace's container exists and is running, without
-    docker-py: `naming.container_name` is a pure function of the workspace
-    path (the same name `ContainerManager.find_container` would resolve
-    to), so a single `docker inspect` call is all that's needed here."""
-    name = container_name(config.workspace_root)
-    try:
-        result = subprocess.run(
-            [docker_bin, "inspect", "-f", "{{.State.Running}}", name],
-            capture_output=True,
-            text=True,
-            timeout=_INSPECT_TIMEOUT_SECONDS,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if result.returncode != 0 or result.stdout.strip() != "true":
-        return None
-    return name
-
-
 def complete(config: RosmanConfig, words: list[str]) -> list[str]:
     """Best-effort completion candidates for the given passthrough words.
     Never raises -- any failure just means no completions this time."""
@@ -160,10 +166,6 @@ def complete(config: RosmanConfig, words: list[str]) -> list[str]:
     docker_bin = shutil.which("docker")
     if docker_bin is None:
         return []
-    container_name_ = _running_container_name(config, docker_bin)
-    if container_name_ is None:
-        return []
-
     inner_line = shlex.join(inner)
     relay = (
         f"COMP_LINE={shlex.quote(inner_line)} COMP_POINT={len(inner_line)} "
@@ -175,7 +177,7 @@ def complete(config: RosmanConfig, words: list[str]) -> list[str]:
         "exec",
         "-w",
         CONTAINER_WORKSPACE_PATH,
-        container_name_,
+        container_name(config.workspace_root),
         "bash",
         "-lc",
         relay,
@@ -188,6 +190,8 @@ def complete(config: RosmanConfig, words: list[str]) -> list[str]:
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
+        return []
+    if result.returncode != 0:
         return []
     output = result.stdout.decode(errors="replace")
     return [word for word in output.split(_ARGCOMPLETE_IFS) if word]
