@@ -727,7 +727,15 @@ def main(argv: list[str] | None = None) -> int:
         # raises, so none of that machinery is needed here anyway.
         return cmd_complete(argparse.Namespace(words=argv[1:]))
 
-    _maybe_show_update_notice()
+    # `rosman completion bash/zsh` is typically invoked once per shell
+    # startup, via `eval "$(rosman completion bash)"` in .bashrc/.zshrc --
+    # not a deliberate "run a rosman command" action by the user. Letting
+    # it trigger the update-notice check ties that check to shell startup
+    # for anyone with tab-completion set up, exactly the "not when the
+    # shell loads" behavior this was explicitly designed to avoid. Real
+    # bug: only `__complete` (above) was ever excluded, not this.
+    if not (argv and argv[0] == "completion"):
+        _maybe_show_update_notice()
 
     from docker.errors import DockerException
 

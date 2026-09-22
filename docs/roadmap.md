@@ -950,3 +950,26 @@ upload) and `packaging/nfpm.yaml` (packaged to
 page packaging convention). Shipped as its own patch release (v0.4.1) --
 packaging/tooling polish, not a new CLI capability, matching this
 project's minor-for-features/patch-for-everything-else convention.
+
+## Fix: update check tied to shell startup (2026-09-22, v0.4.2)
+
+Alec: "for the update check, i dont want to do that when the shell loads.
+do it somewhere else, when a command is actually run. but dont run the
+update check every time... maybe once per day?" Checked the actual code
+before assuming what was needed -- the throttle intervals
+(`update_check.py`'s `CHECK_INTERVAL`/`NOTIFY_INTERVAL`) were already both
+24h, so "once per day" was already correct. The real bug: `main()` only
+ever excluded `__complete` from `_maybe_show_update_notice()`, not
+`completion` -- and `rosman completion bash/zsh` is exactly what
+`eval "$(rosman completion bash)"` in `.bashrc`/`.zshrc` runs once per
+shell startup (see the tab-completion work earlier this session). So
+anyone with tab-completion set up (the setup this project's own docs
+recommend) had the update check genuinely tied to shell startup the whole
+time, contradicting this feature's own explicit original design intent
+("not obnoxiously every time you run a command... not when the shell
+loads" -- see this file's original update-checker entry). Fixed by
+excluding `completion` the same way `__complete` already was. Verified
+live with a real pty (`script -qec`) simulating an actual shell-startup
+eval: `rosman completion bash` now shows no notice even with a synthetic
+"update available" state forced due; an ordinary command (`rosman help`)
+run right after still correctly shows it.

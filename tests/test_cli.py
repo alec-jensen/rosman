@@ -128,6 +128,36 @@ def test_update_notice_prints_when_available():
     assert "a new version exists" in mock_print.call_args[0][0]
 
 
+def test_main_skips_update_notice_for_completion_command(monkeypatch):
+    # Regression test: `rosman completion bash/zsh` is typically invoked
+    # once per shell startup via `eval "$(rosman completion bash)"` in
+    # .bashrc/.zshrc, not a deliberate "run a rosman command" action --
+    # letting it trigger the update-notice check ties that check to shell
+    # startup for anyone with tab-completion set up, exactly what "not
+    # when the shell loads" was supposed to avoid. Only `__complete` was
+    # ever excluded, not this, until this was reported and fixed.
+    import rosman.cli as cli_mod
+
+    called = []
+    monkeypatch.setattr(cli_mod, "_maybe_show_update_notice", lambda: called.append(True))
+
+    rc = cli_mod.main(["completion", "bash"])
+
+    assert rc == 0
+    assert called == []
+
+
+def test_main_still_checks_update_notice_for_a_real_command(monkeypatch):
+    import rosman.cli as cli_mod
+
+    called = []
+    monkeypatch.setattr(cli_mod, "_maybe_show_update_notice", lambda: called.append(True))
+
+    cli_mod.main(["help"])
+
+    assert called == [True]
+
+
 def _make_manager(drifted: bool, reasons=("ros_distro changed",)):
     manager = MagicMock()
     container = MagicMock()
