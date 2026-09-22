@@ -315,7 +315,8 @@ first; pass `-y`/`--yes` to skip the confirmation.
   config/version resolution, container lifecycle, and networking — it
   doesn't reimplement `ros2`.
 
-See [`docs/spec.md`](docs/spec.md) for the full design spec, and
+See [`CHANGELOG.md`](CHANGELOG.md) for what changed in each release,
+[`docs/spec.md`](docs/spec.md) for the full design spec, and
 [`docs/roadmap.md`](docs/roadmap.md) for build/verification status.
 
 ## Known limitations

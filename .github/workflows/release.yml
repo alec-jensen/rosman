@@ -255,10 +255,16 @@ jobs:
         with:
           name: packages
           path: dist/
+      # CHANGELOG.md's own section for this version, not `--generate-notes`
+      # (which just falls back to a bare compare-link for a repo with no
+      # PR-based history) -- keep CHANGELOG.md updated as part of the
+      # commit that bumps the tag, same as every other release so far.
+      - name: Extract changelog section for this version
+        run: python3 packaging/changelog-section.py "${{ github.ref_name }}" > /tmp/release-notes.md
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" dist/* \
             --title "rosman ${{ github.ref_name }}" \
-            --generate-notes
+            --notes-file /tmp/release-notes.md
