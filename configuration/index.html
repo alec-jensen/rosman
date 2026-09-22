@@ -909,7 +909,7 @@ is required — everything else has a default.</p>
 <tr>
 <td><code>restart_policy</code></td>
 <td><code>"no"</code></td>
-<td>Docker restart policy. Deliberately not <code>"unless-stopped"</code> by default — WSL2/Docker Desktop can restart sessions independently of you, and an unexpected already-running container is more confusing than requiring an explicit <code>rosman up</code> after a reboot.</td>
+<td>Docker restart policy. Containers do not restart with Docker after a reboot by default; the next <code>rosman</code> command starts the workspace container on demand.</td>
 </tr>
 <tr>
 <td><code>base_image</code></td>

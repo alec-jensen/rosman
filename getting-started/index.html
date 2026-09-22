@@ -854,13 +854,13 @@ uv<span class="w"> </span>run<span class="w"> </span>rosman<span class="w"> </sp
 <p><code>apt upgrade</code>/<code>dnf upgrade</code>/<code>pacman -Syu</code> pick up new releases
 automatically. Windows package manager support isn't available yet — on
 Windows, or if you're not on apt/dnf/pacman, install from source above, or
-grab a raw binary/wheel from a
+grab a standalone Linux bundle/wheel from a
 <a href="https://github.com/alec-jensen/rosman/releases">GitHub release</a>.</p>
 <p>You need Docker itself already working (Docker Engine on Linux, Docker
 Desktop on Windows) — rosman drives Docker, it doesn't install it.</p>
-<p>The apt/dnf/pacman packages also install a man page (<code>man rosman</code>),
-generated directly from rosman's own CLI parser so it can't drift from
-<code>--help</code>.</p>
+<p>The apt/dnf/pacman packages also install a man page (<code>man rosman</code>) and
+register bash/zsh completion automatically. Both are generated from
+rosman's source so they stay in sync with the CLI.</p>
 <h2 id="your-first-workspace">Your first workspace<a class="headerlink" href="#your-first-workspace" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>my-ros2-project
 rosman<span class="w"> </span>init<span class="w"> </span>--distro<span class="w"> </span>humble
@@ -884,7 +884,8 @@ rosman<span class="w"> </span>doctor<span class="w">            </span><span cla
 </code></pre></div>
 <p>You never have to explicitly start anything — the first <code>rosman &lt;command&gt;</code>
 you run builds the image (showing live progress) and starts the container;
-every command after that reuses it. If you do want direct control:</p>
+every command after that reuses it. The image build prints its elapsed time
+when it finishes or fails. If you do want direct control:</p>
 <div class="highlight"><pre><span></span><code>rosman<span class="w"> </span>up<span class="w">      </span><span class="c1"># start (or create) the container explicitly</span>
 rosman<span class="w"> </span>down<span class="w">    </span><span class="c1"># stop it</span>
 rosman<span class="w"> </span>rebuild<span class="w"> </span><span class="c1"># force-recreate it (e.g. after changing rosman.yml)</span>

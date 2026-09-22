@@ -813,6 +813,12 @@
 
 
 <h1 id="shell-tab-completion">Shell tab-completion<a class="headerlink" href="#shell-tab-completion" title="Permanent link">&para;</a></h1>
+<p>The apt/dnf/pacman packages install completion files into bash and zsh's
+standard lookup paths. Restart the shell after installing or upgrading;
+there is no shell-rc line to add. If you configured an older release with
+<code>eval "$(rosman completion ...)"</code>, remove that line — leaving it is harmless,
+but starts an unnecessary process on every new shell.</p>
+<p>For source or wheel installs, register completion manually:</p>
 <div class="highlight"><pre><span></span><code><span class="nb">echo</span><span class="w"> </span><span class="s1">'eval "$(rosman completion bash)"'</span><span class="w"> </span>&gt;&gt;<span class="w"> </span>~/.bashrc
 <span class="c1"># or, for zsh:</span>
 <span class="nb">echo</span><span class="w"> </span><span class="s1">'eval "$(rosman completion zsh)"'</span><span class="w"> </span>&gt;&gt;<span class="w"> </span>~/.zshrc
