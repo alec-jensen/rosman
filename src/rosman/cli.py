@@ -302,8 +302,8 @@ def _format_size(num_bytes: int) -> str:
 
 
 def cmd_prune(args: argparse.Namespace) -> int:
-    """Removes rosman-built images no longer referenced by any existing
-    container -- these accumulate silently over time, since a config
+    """Removes old rosman-built images not needed by a container or as a
+    workspace's latest image. These accumulate over time, since a config
     change (rosman.yml, rosman.lock, or a rosman upgrade that bumps
     DOCKERFILE_TEMPLATE_VERSION) produces a new hash-tagged image and
     nothing else ever removes the old one. A global operation (not scoped
@@ -317,13 +317,12 @@ def cmd_prune(args: argparse.Namespace) -> int:
     candidates = list_prunable_images(client)
 
     if not candidates:
-        console.print("Nothing to prune -- no unreferenced rosman-managed images found.")
+        console.print("Nothing to prune -- no old, unused rosman-managed images found.")
         return 0
 
     total_size = sum(image.attrs.get("Size", 0) for image in candidates)
     console.print(
-        f"Found {len(candidates)} unreferenced rosman image(s), "
-        f"{_format_size(total_size)} total:"
+        f"Found {len(candidates)} old, unused rosman image(s), {_format_size(total_size)} total:"
     )
     for image in candidates:
         tags = ", ".join(image.tags) if image.tags else image.short_id
@@ -505,7 +504,8 @@ def cmd_shell(args: argparse.Namespace) -> int:
     manager = ContainerManager(client, state)
     container, _ = _ensure_running_with_notice(manager, config)
     workdir = translate_cwd(config)
-    return shell_command(container.name, workdir, shell=args.shell)
+    command = args.shell_args[1:] if args.shell_args[:1] == ["--"] else args.shell_args
+    return shell_command(container.name, workdir, shell=args.shell, command=command)
 
 
 def cmd_push(args: argparse.Namespace) -> int:
@@ -650,7 +650,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_config.set_defaults(func=cmd_config)
 
     p_prune = subparsers.add_parser(
-        "prune", help="Remove rosman-built images no longer used by any container"
+        "prune", help="Remove old rosman-built images, preserving each workspace's latest"
     )
     p_prune.add_argument("-y", "--yes", action="store_true", help="Skip the confirmation prompt")
     p_prune.set_defaults(func=cmd_prune)
@@ -675,8 +675,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_doctor.set_defaults(func=cmd_doctor)
 
-    p_shell = subparsers.add_parser("shell", help="Open an interactive shell in the container")
+    p_shell = subparsers.add_parser(
+        "shell", help="Open a shell or run a command in the container"
+    )
     p_shell.add_argument("--shell", default="bash", help="Shell to run (default: bash)")
+    p_shell.add_argument(
+        "shell_args",
+        nargs=argparse.REMAINDER,
+        metavar="COMMAND",
+        help="Command to run in the login shell; omit for an interactive shell",
+    )
     p_shell.set_defaults(func=cmd_shell)
 
     p_push = subparsers.add_parser(

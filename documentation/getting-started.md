@@ -85,6 +85,7 @@ rosman topic list      # builds the image and starts the container on first use
 rosman colcon build
 rosman run demo_nodes_cpp talker
 rosman shell            # interactive shell in the container, if you need one
+rosman shell ls -la     # run one command there and return its exit code
 rosman status            # see rosman-managed containers
 rosman config            # show the fully resolved effective config
 rosman doctor            # sanity-check your environment
@@ -99,7 +100,7 @@ when it finishes or fails. If you do want direct control:
 rosman up      # start (or create) the container explicitly
 rosman down    # stop it
 rosman rebuild # force-recreate it (e.g. after changing rosman.yml)
-rosman prune   # remove old images no longer used by any container
+rosman prune   # remove old images, keeping each workspace's latest
 ```
 
 Anything that isn't one of rosman's own subcommands (`init`, `up`, `down`,

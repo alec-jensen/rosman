@@ -5,6 +5,20 @@ See [GitHub Releases](https://github.com/alec-jensen/rosman/releases) for
 downloadable artifacts, and [docs/roadmap.md](docs/roadmap.md) for the
 full build/verification history behind each entry.
 
+## v0.4.5 — 2026-09-22
+
+### Added
+
+- `rosman shell <command> [args...]` runs a command in the container's
+  login shell, using the workspace directory and returning its exit code.
+  `rosman shell` still opens an interactive shell.
+
+### Fixed
+
+- `rosman prune` now preserves the newest image for each existing
+  workspace, even when no container references it. Images referenced by
+  running or stopped containers remain protected.
+
 ## v0.4.4 — 2026-09-22
 
 ### Fixed

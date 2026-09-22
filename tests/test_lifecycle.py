@@ -7,6 +7,7 @@ import pytest
 from docker.errors import APIError, ImageNotFound, NotFound
 
 from rosman.config import parse_config
+from rosman.docker_labels import WORKSPACE_LABEL
 from rosman.errors import ContainerError, RosmanError
 from rosman.lifecycle import (
     DEVICE_GROUPS,
@@ -22,6 +23,7 @@ from rosman.lifecycle import (
     resolve_network_mode,
     resolve_ports,
 )
+from rosman.naming import workspace_hash
 from rosman.networking import dds_port_range
 from rosman.state import RosmanState
 
@@ -576,6 +578,111 @@ def test_list_managed_images_dedupes_labeled_and_legacy():
     result = list_managed_images(client)
 
     assert result == [image]
+
+
+def _prune_image(image_id, tags, created, workspace=None):
+    image = MagicMock(id=image_id, tags=tags)
+    labels = {WORKSPACE_LABEL: str(workspace)} if workspace else {}
+    image.attrs = {"Created": created, "Config": {"Labels": labels}}
+    return image
+
+
+def test_list_prunable_images_keeps_latest_without_container(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    repo = f"rosman/humble-{workspace_hash(workspace)}"
+    old = _prune_image("sha256:old", [f"{repo}:000000000001"], "2026-09-20T00:00:00Z", workspace)
+    latest = _prune_image(
+        "sha256:latest", [f"{repo}:000000000002"], "2026-09-21T00:00:00Z", workspace
+    )
+    monkeypatch.setattr("rosman.lifecycle.list_managed_images", lambda client: [old, latest])
+    client = MagicMock()
+    client.containers.list.return_value = []
+
+    assert list_prunable_images(client) == [old]
+
+
+def test_list_prunable_images_removes_deleted_workspace_images(tmp_path, monkeypatch):
+    deleted_workspace = tmp_path / "deleted"
+    repo = f"rosman/humble-{workspace_hash(deleted_workspace)}"
+    image = _prune_image(
+        "sha256:deleted",
+        [f"{repo}:000000000001"],
+        "2026-09-21T00:00:00Z",
+        deleted_workspace,
+    )
+    monkeypatch.setattr("rosman.lifecycle.list_managed_images", lambda client: [image])
+    client = MagicMock()
+    client.containers.list.return_value = []
+
+    assert list_prunable_images(client) == [image]
+
+
+def test_list_prunable_images_compares_labeled_and_legacy_for_same_workspace(
+    tmp_path, monkeypatch
+):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    repo = f"rosman/humble-{workspace_hash(workspace)}"
+    old_legacy = _prune_image(
+        "sha256:old", [f"{repo}:000000000001"], "2026-09-20T00:00:00Z"
+    )
+    latest = _prune_image(
+        "sha256:latest", [f"{repo}:000000000002"], "2026-09-21T00:00:00Z", workspace
+    )
+    monkeypatch.setattr("rosman.lifecycle.list_managed_images", lambda client: [old_legacy, latest])
+    client = MagicMock()
+    client.containers.list.return_value = []
+
+    assert list_prunable_images(client) == [old_legacy]
+
+
+def test_list_prunable_images_keeps_latest_registry_image(monkeypatch):
+    repo = "ghcr.io/team/project"
+    old = _prune_image("sha256:old", [f"{repo}:000000000001"], "2026-09-20T00:00:00Z")
+    latest = _prune_image("sha256:latest", [f"{repo}:000000000002"], "2026-09-21T00:00:00Z")
+    monkeypatch.setattr("rosman.lifecycle.list_managed_images", lambda client: [old, latest])
+    client = MagicMock()
+    client.containers.list.return_value = []
+
+    assert list_prunable_images(client) == [old]
+
+
+def test_list_prunable_images_keeps_latest_legacy_image(monkeypatch):
+    repo = "rosman/humble-12345678"
+    old = _prune_image("sha256:old", [f"{repo}:000000000001"], "2026-09-20T00:00:00Z")
+    latest = _prune_image("sha256:latest", [f"{repo}:000000000002"], "2026-09-21T00:00:00Z")
+    monkeypatch.setattr("rosman.lifecycle.list_managed_images", lambda client: [old, latest])
+    client = MagicMock()
+    client.containers.list.return_value = []
+
+    assert list_prunable_images(client) == [old]
+
+
+def test_list_prunable_images_keeps_shared_image_used_by_other_workspace(tmp_path, monkeypatch):
+    workspace_a = tmp_path / "a"
+    workspace_b = tmp_path / "b"
+    workspace_a.mkdir()
+    workspace_b.mkdir()
+    repo_a = f"rosman/humble-{workspace_hash(workspace_a)}"
+    repo_b = f"rosman/humble-{workspace_hash(workspace_b)}"
+    shared = _prune_image(
+        "sha256:shared",
+        [f"{repo_a}:000000000001", f"{repo_b}:000000000001"],
+        "2026-09-20T00:00:00Z",
+        workspace_a,
+    )
+    newer_a = _prune_image(
+        "sha256:newer",
+        [f"{repo_a}:000000000002"],
+        "2026-09-21T00:00:00Z",
+        workspace_a,
+    )
+    monkeypatch.setattr("rosman.lifecycle.list_managed_images", lambda client: [shared, newer_a])
+    client = MagicMock()
+    client.containers.list.return_value = []
+
+    assert list_prunable_images(client) == []
 
 
 def test_list_prunable_images_excludes_referenced(monkeypatch):

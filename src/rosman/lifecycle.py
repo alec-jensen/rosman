@@ -24,6 +24,7 @@ import shutil
 import tempfile
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 import docker
@@ -352,7 +353,9 @@ class ImageResult:
 # labeling. Doesn't cover `registry_image`-tagged images built before this
 # either, since those have no distinguishing prefix at all; those only
 # become prunable once rebuilt/repushed with the new labeled version.
-_LEGACY_IMAGE_TAG_RE = re.compile(r"^rosman/[a-z0-9-]+-[0-9a-f]{8}:[0-9a-f]{12}$")
+_LEGACY_IMAGE_TAG_RE = re.compile(
+    r"^rosman/[a-z0-9-]+-(?P<workspace_hash>[0-9a-f]{8}):[0-9a-f]{12}$"
+)
 
 
 def list_managed_images(client: docker.DockerClient) -> list:
@@ -372,13 +375,75 @@ def list_managed_images(client: docker.DockerClient) -> list:
 
 
 def list_prunable_images(client: docker.DockerClient) -> list:
-    """rosman-managed images not referenced by any existing container
-    (running or stopped) -- safe to remove regardless of *why* they're
-    orphaned (a config change produced a new hash-tagged image and the
-    old one was never cleaned up, or the workspace itself was deleted
-    entirely). Never removes an image a live container still depends on."""
+    """Old managed images with no container, preserving the newest image
+    for each workspace even when it has no container. Deleted workspaces
+    with known paths have no protected image once deleted. Legacy and
+    registry tags without a recoverable workspace path keep their newest
+    image as a conservative fallback."""
+
+    def attrs_of(image: object) -> dict:
+        attrs = image.attrs
+        return attrs if isinstance(attrs, dict) else {}
+
+    def created_at(image: object) -> float:
+        created = attrs_of(image).get("Created")
+        if isinstance(created, (int, float)):
+            return float(created)
+        if isinstance(created, str):
+            try:
+                parsed = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                return parsed.replace(tzinfo=parsed.tzinfo or timezone.utc).timestamp()
+            except ValueError:
+                pass
+        return float("-inf")
+
+    images = list_managed_images(client)
     referenced_ids = {c.attrs["Image"] for c in client.containers.list(all=True)}
-    return [image for image in list_managed_images(client) if image.id not in referenced_ids]
+
+    # A labeled image connects its legacy-style tag's workspace hash back
+    # to a real path, so old and new images compete in the same group.
+    workspace_by_hash: dict[str, str] = {}
+    for image in images:
+        labels = (attrs_of(image).get("Config") or {}).get("Labels") or {}
+        workspace = labels.get(WORKSPACE_LABEL)
+        if workspace:
+            workspace_by_hash[workspace_hash(Path(workspace))] = workspace
+
+    newest_by_group: dict[tuple[str, str], object] = {}
+    for image in images:
+        labels = (attrs_of(image).get("Config") or {}).get("Labels") or {}
+        workspace = labels.get(WORKSPACE_LABEL)
+        groups: set[tuple[str, str]] = set()
+        if workspace and Path(workspace).is_dir():
+            groups.add(("workspace", workspace))
+        for tag in image.tags or []:
+            match = _LEGACY_IMAGE_TAG_RE.match(tag)
+            if match:
+                tag_workspace = workspace_by_hash.get(match.group("workspace_hash"))
+                if tag_workspace:
+                    if Path(tag_workspace).is_dir():
+                        groups.add(("workspace", tag_workspace))
+                else:
+                    # Pre-label images contain only a workspace hash; Docker
+                    # cannot tell whether that workspace still exists.
+                    groups.add(("legacy", match.group("workspace_hash")))
+            elif ":" in tag:
+                # Registry images can be shared by multiple workspaces.
+                groups.add(("registry", tag.rsplit(":", 1)[0]))
+        for group in groups:
+            previous = newest_by_group.get(group)
+            if previous is None or (created_at(image), image.id) > (
+                created_at(previous),
+                previous.id,
+            ):
+                newest_by_group[group] = image
+
+    protected_ids = {image.id for image in newest_by_group.values()}
+    return [
+        image
+        for image in images
+        if image.id not in referenced_ids and image.id not in protected_ids
+    ]
 
 
 def remove_images(client: docker.DockerClient, images: list) -> tuple[int, int]:

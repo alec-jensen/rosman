@@ -11,19 +11,22 @@ these accumulate over time. On a machine used for real development, this
 adds up fast: several gigabytes per stale image, times however many
 config changes and rebuilds have happened.
 
-`rosman prune` removes rosman-built images that no longer have **any**
-existing container referencing them — running or stopped — regardless of
-*why* they became orphaned:
+`rosman prune` removes older rosman-built images while preserving the
+newest image for each existing workspace, even if no container uses it
+yet. It also preserves every image referenced by a running or stopped
+container.
 
-- A config change produced a new hash-tagged image, and the container
-  was rebuilt against it, leaving the old image tag behind with nothing
-  using it.
-- The workspace itself was deleted from disk entirely, but its
-  container/image never got explicitly removed first.
+A config change may leave an older image with no container. Images from
+a workspace deleted from disk can also be cleaned up. Rosman identifies
+workspaces from image labels and, for images created before those labels
+existed, from their tags. When an older image's workspace path cannot be
+recovered, rosman keeps the newest image in that tag group to avoid
+deleting a workspace's only available image. Shared registry image tags
+receive the same conservative treatment.
 
 ```sh
 $ rosman prune
-Found 6 unreferenced rosman image(s), 7.2GB total:
+Found 6 old, unused rosman image(s), 7.2GB total:
   - rosman/humble-00a95c48:1b8c0353fb15 (1.4GB)
   - rosman/humble-3fb2f057:475f136f54fb (1.4GB)
   ...
@@ -33,24 +36,17 @@ Removed 6 image(s), reclaimed 7.2GB.
 
 ## Why it's safe
 
-`rosman prune` only ever removes an image with **zero** container
-references — an image any container (even a stopped one you might still
-want) still points at is never touched. This is the same standard as
-`docker image prune`'s own dangling-image cleanup, just scoped to
-rosman-built images specifically (identified by a build-time label, with
-a tag-pattern fallback for images built before that label existed) rather
-than truly untagged ones — which is why `rosman prune` finds real,
-reclaimable space that plain `docker system prune` won't, since a
-rosman-built image always has a real tag and is never "dangling" in
-Docker's own sense.
+The candidate list excludes images used by any existing container and
+each workspace's latest image. Rosman removes only its own managed
+images, identified by a build-time label or an older rosman tag pattern.
+It previews candidates and their sizes before asking for confirmation.
 
 ## Scope
 
-It's a **global** operation, not scoped to the current workspace or
-directory — a deleted workspace's orphaned images are exactly as safe (and
-worth) cleaning up as a rebuilt one's, and there's no reliable way to
-enumerate "only this workspace's old images" that would also catch the
-deleted-workspace case.
+Pruning is global across workspaces. For labeled local images, deleting
+a workspace makes all of its unreferenced images eligible. Legacy and
+shared registry tags may retain one image when Docker metadata cannot
+reliably identify the workspace path.
 
 ## Non-interactive use
 

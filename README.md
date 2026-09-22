@@ -82,15 +82,21 @@ rosman topic list               # auto-builds/starts the container, then runs `r
 rosman colcon build              # forwarded to `colcon build` inside the container
 rosman rosdep install            # resolve + install src/ packages' apt deps, and lock them
 rosman shell                    # interactive shell in the container
+rosman shell ls -la             # run a command in the same login shell
 rosman status                   # list rosman-managed containers
 rosman doctor                   # environment/config sanity checks
 rosman doctor --network-check   # + a two-container pub/sub round trip over the network group
 rosman doctor --fix             # + auto-rebuild if config has drifted
 rosman config                   # show the fully resolved effective config (domain_id, network_mode, image tag, ...)
-rosman prune                    # remove rosman-built images no longer used by any container
+rosman prune                    # remove old images, keeping each workspace's latest
 rosman push                     # build (if needed) and push the image to registry_image, for your team
 rosman down                     # stop the container (the next ROS command starts it again)
 ```
+
+`rosman shell` opens an interactive login shell. `rosman shell <command>
+[args...]` runs a command there and returns its exit code. To use shell
+operators or variable expansion, pass one quoted script, for example
+`rosman shell 'echo "$ROS_DISTRO" && pwd'`.
 
 Anything that isn't one of rosman's own subcommands (`init`, `up`, `down`,
 `status`, `config`, `prune`, `rebuild`, `doctor`, `shell`, `push`,
@@ -299,13 +305,13 @@ rosman prune
 Every change to `rosman.yml`/`rosman.lock` — or a rosman upgrade that
 touches the image template — produces a new, distinctly-tagged image;
 nothing removes the old one automatically. `rosman prune` removes
-rosman-built images no longer used by *any* existing container (running
-or stopped), regardless of why they're orphaned — a config change that
-left an old tag behind, or a workspace you deleted entirely. It's a
-global cleanup, not scoped to the current directory, and it only ever
-removes an image with zero container references, so nothing currently in
-use is at risk. Prints what it would remove and the reclaimable size
-first; pass `-y`/`--yes` to skip the confirmation.
+older rosman-built images while keeping the newest image for each existing
+workspace, even if it has no container yet. Any image referenced by a
+running or stopped container is also kept. The cleanup covers all
+workspaces, including images left behind by deleted workspaces. For
+older images whose workspace cannot be identified, rosman conservatively
+keeps the newest image in each tag group. It previews the candidates and
+reclaimable size; pass `-y`/`--yes` to skip confirmation.
 
 ## Design decisions
 

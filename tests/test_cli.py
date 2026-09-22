@@ -11,9 +11,11 @@ from rosman.cli import (
     _ensure_running_with_notice,
     _fix_config_drift,
     _maybe_show_update_notice,
+    build_parser,
     cmd_config,
     cmd_init,
     cmd_prune,
+    cmd_shell,
 )
 from rosman.config import parse_config
 from rosman.errors import RosmanError
@@ -417,6 +419,41 @@ def test_cmd_config_shows_container_status_when_docker_reachable(tmp_path: Path,
 
     text = render_table_text(captured["table"])
     assert "running" in text
+
+
+# -- cmd_shell ---------------------------------------------------------------
+
+
+def test_shell_parser_accepts_command_and_shell_option():
+    parser = build_parser()
+    interactive = parser.parse_args(["shell"])
+    command = parser.parse_args(["shell", "--shell", "zsh", "echo", "hello world"])
+
+    assert interactive.shell_args == []
+    assert command.shell == "zsh"
+    assert command.shell_args == ["echo", "hello world"]
+
+
+def test_cmd_shell_forwards_command_and_exit_code(monkeypatch):
+    import rosman.cli as cli_mod
+
+    args = build_parser().parse_args(["shell", "--", "echo", "-n", "hello"])
+    container = SimpleNamespace(name="my-container")
+    monkeypatch.setattr(cli_mod, "_load_config_or_exit", lambda: object())
+    monkeypatch.setattr("rosman.docker_client.get_client", lambda: MagicMock())
+    monkeypatch.setattr("rosman.lifecycle.ContainerManager", lambda client, state: MagicMock())
+    monkeypatch.setattr(cli_mod.RosmanState, "load", lambda: object())
+    monkeypatch.setattr(
+        cli_mod, "_ensure_running_with_notice", lambda manager, config: (container, False)
+    )
+    monkeypatch.setattr(cli_mod, "translate_cwd", lambda config: "/workspace")
+    forwarded = MagicMock(return_value=37)
+    monkeypatch.setattr(cli_mod, "shell_command", forwarded)
+
+    assert cmd_shell(args) == 37
+    forwarded.assert_called_once_with(
+        "my-container", "/workspace", shell="bash", command=["echo", "-n", "hello"]
+    )
 
 
 # -- cmd_prune ---------------------------------------------------------------

@@ -120,3 +120,32 @@ def test_shell_command_uses_login_shell(monkeypatch):
     )
     shell_command("my-container", "/workspace")
     assert captured["command"] == ["bash", "-l"]
+
+
+
+def test_shell_command_runs_script_in_login_shell(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        dispatch,
+        "exec_in_container",
+        lambda container, workdir, command: captured.setdefault("command", command),
+    )
+
+    shell_command("my-container", "/workspace", command=['echo "$ROS_DISTRO" && pwd'])
+
+    assert captured["command"] == ["bash", "-lc", 'echo "$ROS_DISTRO" && pwd']
+
+
+def test_shell_command_preserves_separate_arguments_and_exit_code(monkeypatch):
+    captured = {}
+
+    def fake_exec(container, workdir, command):
+        captured["command"] = command
+        return 37
+
+    monkeypatch.setattr(dispatch, "exec_in_container", fake_exec)
+    args = ["printf", "%s\n", "hello world"]
+
+    assert shell_command("my-container", "/workspace", shell="zsh", command=args) == 37
+    assert captured["command"][:2] == ["zsh", "-lc"]
+    assert shlex.split(captured["command"][2]) == args

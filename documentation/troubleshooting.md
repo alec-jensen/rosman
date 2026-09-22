@@ -118,7 +118,7 @@ means something regressed.
 Every `rosman.yml`/`rosman.lock` change (or a rosman upgrade touching the
 image build template) produces a new, separately-tagged image — nothing
 removes the old one automatically. Run `rosman prune` to remove
-rosman-built images no longer used by any container; see [Cleaning up old
+old rosman-built images while keeping each workspace's latest image; see [Cleaning up old
 images](guides/prune.md).
 
 ## Still stuck?

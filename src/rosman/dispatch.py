@@ -127,7 +127,19 @@ def dispatch_passthrough(args: list[str], container_name: str, workdir: str) -> 
     return exec_in_container(container_name, workdir, ["bash", "-lc", shlex.join(command)])
 
 
-def shell_command(container_name: str, workdir: str, shell: str = "bash") -> int:
-    """Drop into an interactive login shell, so the same `/etc/profile.d`
-    ROS sourcing that `dispatch_passthrough` relies on applies here too."""
+def shell_command(
+    container_name: str,
+    workdir: str,
+    shell: str = "bash",
+    command: list[str] | None = None,
+) -> int:
+    """Run an interactive login shell, or a command in that login shell.
+
+    A single quoted command is shell source (so operators and expansion
+    work); multiple arguments are quoted as separate words before the
+    login shell parses them.
+    """
+    if command:
+        script = command[0] if len(command) == 1 else shlex.join(command)
+        return exec_in_container(container_name, workdir, [shell, "-lc", script])
     return exec_in_container(container_name, workdir, [shell, "-l"])
