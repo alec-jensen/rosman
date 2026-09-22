@@ -823,6 +823,10 @@ Docker itself isn't reachable — make sure Docker Engine (Linux) or Docker
 Desktop (Windows) is running, and that your user has permission to talk to
 it (on Linux, being in the <code>docker</code> group; a fresh group membership needs
 a new login session to take effect, not just a new terminal).</p>
+<p><strong>An image build fails while running <code>setup_script</code>.</strong> Rosman prints
+the full Docker build output beneath the failure summary, including the
+script's stdout and stderr. Check those lines for the failing command and
+its diagnostic message.</p>
 <p><strong>A build hangs for a long time with no error, using a custom
 <code>base_image</code>.</strong> A bare (non-ROS) base image doesn't set
 <code>DEBIAN_FRONTEND=noninteractive</code> on its own, and an interactive <code>tzdata</code>
