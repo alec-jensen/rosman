@@ -852,3 +852,70 @@ and never called the real install at all. Fixed:
   resolved, installed immediately, written to `rosman.lock`, and baked
   into a `rosman rebuild`d image, confirmed importable in the fresh
   container.
+
+## `rosman config`, `rosman prune`, `doctor --fix` (2026-09-22, v0.4.0)
+
+Alec, asked as an open "what's missing or would make this easier to use"
+prompt: "is there any missing features or anything we could do to make it
+easier to use/more feature rich." Presented three concrete, verified
+candidates rather than a generic brainstorm list; he picked all three.
+
+**`rosman prune`** (`cmd_prune` in cli.py; `list_managed_images`,
+`list_prunable_images`, `remove_images` in lifecycle.py) was the one
+backed by a real, measured problem, not a guess: checked this actual dev
+machine before proposing anything and found 17+ rosman-built images,
+~20GB, many for workspaces already deleted from disk or superseded by a
+newer config-hash tag — nothing had ever cleaned these up, since every
+`rosman.yml`/`rosman.lock` change (or a `DOCKERFILE_TEMPLATE_VERSION`
+bump) produces a new content-hash-tagged image and the old one just sits
+there. Global (not workspace-scoped) by design, since a deleted
+workspace's orphaned images are exactly as real a problem as a rebuilt
+one's, and there's no reliable way to enumerate "only this workspace's
+old images" that would also catch the deleted-workspace case anyway.
+Identifies rosman-built images via a new build-time `MANAGED_LABEL`
+(`ensure_image`'s `client.api.build(..., labels=...)`), plus a regex
+fallback (`_LEGACY_IMAGE_TAG_RE`) for images built before this label
+existed, so upgrading to a labeled version doesn't leave the whole
+existing pile invisible to it. Only ever removes an image with zero
+container references (running or stopped) — the same safety bar
+`docker image prune` uses for dangling images, just scoped to
+rosman-tagged ones specifically (which is exactly why this finds real
+space `docker system prune` doesn't: a rosman image always has a real
+tag, so it's never "dangling" in Docker's own sense).
+
+Real bug caught live while first testing `rosman prune` for real (not a
+synthetic test) against this machine's actual 17-image pile:
+`images.remove(image_id, force=False)` refuses outright with "image is
+referenced in multiple repositories" whenever more than one tag points at
+the same image ID — common here, since several small same-config
+workspaces produce byte-identical images under different repo names. The
+first prune run silently skipped every multi-tagged image as a result
+(caught by the `except (APIError, NotFound): continue` that's also there
+on purpose, to skip images something else grabbed a reference to in the
+meantime — so this failure mode was invisible without checking the
+before/after image list directly). Fixed by removing each tag
+individually (`docker rmi tag1 tag2 ...` does the same thing) rather than
+by bare image ID. Live-verified end to end: found and correctly removed
+7.2GB of real orphaned images on this machine, across both the
+single-tag and multi-tag cases, while correctly preserving the one image
+still referenced by a stopped container.
+
+**`rosman config`** (`cmd_config`) prints the fully *resolved* effective
+config — what `domain_id: auto`/`network_mode: auto` actually resolved
+to, the current image tag, container status — distinct from `rosman
+doctor`, which bundles this into a much broader Docker-touching health
+check. Deliberately reads `domain_id`'s auto-assigned value from
+persisted state rather than calling `resolve_domain_id` directly, since
+that assigns-and-persists on first call and a read-only introspection
+command must not have that side effect. Docker reachability is optional
+(wrapped in `try/except RosmanError`) — the config-resolution half of the
+output should work even offline.
+
+**`rosman doctor --fix`** (`_fix_config_drift`) deliberately narrow in
+scope: only auto-rebuilds on config drift, run before the normal checks
+so the subsequent report reflects the post-fix state. Everything else
+`doctor` reports stays informational-only — in particular, a missing
+usbipd-attached device is *not* auto-fixed, since `usbipd bind` needs
+Windows-side admin elevation rosman has no reliable way to trigger
+non-interactively; attempting it and silently failing would be worse than
+not attempting it and saying so.

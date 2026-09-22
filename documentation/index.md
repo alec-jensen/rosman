@@ -34,8 +34,9 @@ is not supported.
   [building from source (rosdep + lock)](guides/rosdep-lockfile.md),
   [team-shared images](guides/team-images.md),
   [multi-host over LAN](guides/multi-host.md),
-  [shell tab-completion](guides/tab-completion.md), and
-  [GPU/GUI/device passthrough](guides/gpu-gui-devices.md).
+  [shell tab-completion](guides/tab-completion.md),
+  [GPU/GUI/device passthrough](guides/gpu-gui-devices.md), and
+  [cleaning up old images](guides/prune.md).
 - **[Examples](examples.md)** — complete `rosman.yml` files for common
   setups.
 - **[Troubleshooting](troubleshooting.md)** — `rosman doctor` and fixes

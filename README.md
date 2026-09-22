@@ -81,22 +81,30 @@ rosman shell                    # interactive shell in the container
 rosman status                   # list rosman-managed containers
 rosman doctor                   # environment/config sanity checks
 rosman doctor --network-check   # + a two-container pub/sub round trip over the network group
+rosman doctor --fix             # + auto-rebuild if config has drifted
+rosman config                   # show the fully resolved effective config (domain_id, network_mode, image tag, ...)
+rosman prune                    # remove rosman-built images no longer used by any container
 rosman push                     # build (if needed) and push the image to registry_image, for your team
 rosman down                     # stop the container (rosman up starts it again)
 ```
 
 Anything that isn't one of rosman's own subcommands (`init`, `up`, `down`,
-`status`, `rebuild`, `doctor`, `shell`, `push`, `completion`, `help`) is
-forwarded verbatim as `ros2 <args>` (or `colcon <args>`/`rosdep <args>` if
-the first word is `colcon`/`rosdep`) inside the workspace container —
-rosman does not reimplement the `ros2` CLI. `rosdep install` specifically
-is the one exception: see [Building packages from
-source](#building-packages-from-source-rosdep--rosmanlock) below.
+`status`, `config`, `prune`, `rebuild`, `doctor`, `shell`, `push`,
+`completion`, `help`) is forwarded verbatim as `ros2 <args>` (or `colcon
+<args>`/`rosdep <args>` if the first word is `colcon`/`rosdep`) inside the
+workspace container — rosman does not reimplement the `ros2` CLI.
+`rosdep install` specifically is the one exception: see [Building packages
+from source](#building-packages-from-source-rosdep--rosmanlock) below.
 
 If `rosman.yml`/`rosman.lock` has changed since the container was built,
 any command that would use it (not just `rosman up`) asks whether to
 rebuild first — interactively; in a non-interactive session it just warns
-and keeps using the existing container.
+and keeps using the existing container. `rosman doctor --fix` does the
+same rebuild automatically, non-interactively, as part of a health check.
+
+Unsure what a workspace actually resolved to — auto-assigned `domain_id`,
+auto-detected `network_mode`, the current image tag? `rosman config`
+prints it.
 
 ## Config: `rosman.yml`
 
@@ -268,6 +276,23 @@ names, node names, etc.) exactly as they would inside the container —
 relays the completion request through `docker exec` rather than
 reimplementing any of it. Only works while the workspace container is
 already running (`rosman up`); pressing Tab never starts one.
+
+## Cleaning up: `rosman prune`
+
+```sh
+rosman prune
+```
+
+Every change to `rosman.yml`/`rosman.lock` — or a rosman upgrade that
+touches the image template — produces a new, distinctly-tagged image;
+nothing removes the old one automatically. `rosman prune` removes
+rosman-built images no longer used by *any* existing container (running
+or stopped), regardless of why they're orphaned — a config change that
+left an old tag behind, or a workspace you deleted entirely. It's a
+global cleanup, not scoped to the current directory, and it only ever
+removes an image with zero container references, so nothing currently in
+use is at risk. Prints what it would remove and the reclaimable size
+first; pass `-y`/`--yes` to skip the confirmation.
 
 ## Design decisions
 

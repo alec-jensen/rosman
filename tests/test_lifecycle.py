@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from docker.errors import APIError, ImageNotFound
+from docker.errors import APIError, ImageNotFound, NotFound
 
 from rosman.config import parse_config
 from rosman.errors import ContainerError, RosmanError
@@ -15,6 +15,9 @@ from rosman.lifecycle import (
     ContainerManager,
     ImageResult,
     compute_config_hash,
+    list_managed_images,
+    list_prunable_images,
+    remove_images,
     render_dockerfile,
     resolve_network_mode,
     resolve_ports,
@@ -495,3 +498,141 @@ def test_push_image_wraps_api_error(tmp_path: Path):
 
     with pytest.raises(ContainerError, match="docker login"):
         manager.push_image(config)
+
+
+def _images_list_side_effect(labeled, unfiltered):
+    def _side_effect(*args, **kwargs):
+        return labeled if kwargs.get("filters") else unfiltered
+
+    return _side_effect
+
+
+def test_list_managed_images_finds_labeled_images():
+    client = MagicMock()
+    labeled_image = MagicMock(id="sha256:aaa", tags=["rosman/humble-abcd1234:def012345678"])
+    client.images.list.side_effect = _images_list_side_effect([labeled_image], [labeled_image])
+
+    assert list_managed_images(client) == [labeled_image]
+
+
+def test_list_managed_images_finds_legacy_tagged_images_without_label():
+    # Regression: images built before MANAGED_LABEL existed must still be
+    # visible to `rosman prune`, identified by tag pattern instead.
+    legacy_image = MagicMock(id="sha256:bbb", tags=["rosman/humble-12345678:abcdef123456"])
+    unrelated_image = MagicMock(id="sha256:ccc", tags=["ubuntu:22.04"])
+    client = MagicMock()
+    client.images.list.side_effect = _images_list_side_effect(
+        [], [legacy_image, unrelated_image]
+    )
+
+    assert list_managed_images(client) == [legacy_image]
+
+
+def test_list_managed_images_dedupes_labeled_and_legacy():
+    # A labeled image also shows up in the unfiltered `images.list()` --
+    # must not be counted/returned twice just because it happens to also
+    # match the legacy tag pattern.
+    image = MagicMock(id="sha256:aaa", tags=["rosman/humble-12345678:abcdef123456"])
+    client = MagicMock()
+    client.images.list.side_effect = _images_list_side_effect([image], [image])
+
+    result = list_managed_images(client)
+
+    assert result == [image]
+
+
+def test_list_prunable_images_excludes_referenced(monkeypatch):
+    referenced = MagicMock(id="sha256:referenced")
+    unreferenced = MagicMock(id="sha256:orphaned")
+    monkeypatch.setattr(
+        "rosman.lifecycle.list_managed_images", lambda client: [referenced, unreferenced]
+    )
+    client = MagicMock()
+    container = MagicMock()
+    container.attrs = {"Image": "sha256:referenced"}
+    client.containers.list.return_value = [container]
+
+    assert list_prunable_images(client) == [unreferenced]
+
+
+def test_list_prunable_images_all_orphaned_when_no_containers(monkeypatch):
+    image = MagicMock(id="sha256:aaa")
+    monkeypatch.setattr("rosman.lifecycle.list_managed_images", lambda client: [image])
+    client = MagicMock()
+    client.containers.list.return_value = []
+
+    assert list_prunable_images(client) == [image]
+
+
+def test_remove_images_removes_each_tag_individually():
+    # Regression: `images.remove(image_id, force=False)` refuses outright
+    # when multiple tags point at one image ID ("referenced in multiple
+    # repositories") -- confirmed against a real Docker daemon. Must
+    # untag each reference instead, like `docker rmi tag1 tag2 ...` does.
+    client = MagicMock()
+    image = MagicMock(id="sha256:aaa", tags=["repo1:tag", "repo2:tag"])
+    image.attrs = {"Size": 1000}
+
+    count, reclaimed = remove_images(client, [image])
+
+    assert count == 1
+    assert reclaimed == 1000
+    client.images.remove.assert_any_call("repo1:tag", force=False)
+    client.images.remove.assert_any_call("repo2:tag", force=False)
+    assert client.images.remove.call_count == 2
+
+
+def test_remove_images_falls_back_to_id_when_no_tags():
+    client = MagicMock()
+    image = MagicMock(id="sha256:aaa", tags=[])
+    image.attrs = {"Size": 500}
+
+    count, reclaimed = remove_images(client, [image])
+
+    client.images.remove.assert_called_once_with("sha256:aaa", force=False)
+    assert count == 1
+    assert reclaimed == 500
+
+
+def test_remove_images_skips_failures_without_raising():
+    client = MagicMock()
+    ok_image = MagicMock(id="sha256:aaa", tags=["repo:ok"])
+    ok_image.attrs = {"Size": 100}
+    bad_image = MagicMock(id="sha256:bbb", tags=["repo:bad"])
+    bad_image.attrs = {"Size": 200}
+
+    def remove_side_effect(ref, force):
+        if ref == "repo:bad":
+            raise APIError("conflict")
+
+    client.images.remove.side_effect = remove_side_effect
+
+    count, reclaimed = remove_images(client, [ok_image, bad_image])
+
+    assert count == 1
+    assert reclaimed == 100
+
+
+def test_remove_images_treats_not_found_as_a_skip_too():
+    client = MagicMock()
+    image = MagicMock(id="sha256:aaa", tags=["repo:gone"])
+    image.attrs = {"Size": 100}
+    client.images.remove.side_effect = NotFound("no such image")
+
+    count, reclaimed = remove_images(client, [image])
+
+    assert count == 0
+    assert reclaimed == 0
+
+
+def test_remove_images_sums_across_multiple_images():
+    client = MagicMock()
+    first = MagicMock(id="sha256:aaa", tags=["repo:a"])
+    first.attrs = {"Size": 100}
+    second = MagicMock(id="sha256:bbb", tags=["repo:b"])
+    second.attrs = {"Size": 250}
+
+    count, reclaimed = remove_images(client, [first, second])
+
+    assert count == 2
+    assert reclaimed == 350

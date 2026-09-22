@@ -29,6 +29,8 @@ RESERVED_COMMANDS = {
     "up",
     "down",
     "status",
+    "config",
+    "prune",
     "rebuild",
     "doctor",
     "shell",

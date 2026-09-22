@@ -204,6 +204,152 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_config(args: argparse.Namespace) -> int:
+    """Prints the fully *resolved* effective config for this workspace --
+    distinct from `rosman doctor` (a broader health-check bundle that
+    touches the Docker daemon): this is pure config resolution, showing
+    what "auto" values (`domain_id`, `network_mode`) actually resolved to,
+    without needing to piece it together from doctor/status output."""
+    from rosman.docker_client import get_client
+    from rosman.lifecycle import ContainerManager, compute_config_hash, resolve_network_mode
+    from rosman.naming import container_name, image_name
+
+    config = _load_config_or_exit()
+    state = RosmanState.load()
+    domain_id_display = str(config.domain_id)
+    if config.domain_id == "auto":
+        # resolve_domain_id assigns+persists on first call, so this must
+        # not run just to *display* a value -- peek at persisted state
+        # instead, falling back to "not yet assigned" rather than
+        # side-effecting an assignment from a read-only command. Goes
+        # through state.get_project (not state.projects directly) so the
+        # workspace-path-to-key hashing stays owned by state.py's own
+        # _key(), rather than a second, easy-to-drift copy of that logic
+        # living here too.
+        assigned = state.get_project(config.workspace_root)
+        domain_id_display = (
+            f"{assigned.domain_id} (auto-assigned)"
+            if assigned.domain_id is not None
+            else "auto (not yet assigned -- assigned on first `rosman up`)"
+        )
+
+    network_mode = resolve_network_mode(config)
+    network_mode_display = (
+        f"{network_mode} (auto-detected)" if config.network_mode == "auto" else network_mode
+    )
+
+    table = Table(show_header=False)
+    table.add_column("field", style="bold")
+    table.add_column("value")
+    table.add_row("config file", str(config.config_path))
+    table.add_row("ros_distro", config.ros_distro)
+    table.add_row("rmw_implementation", config.rmw_implementation)
+    table.add_row("domain_id", domain_id_display)
+    table.add_row("network_mode", network_mode_display)
+    if network_mode != "host":
+        table.add_row("network group", config.network)
+    table.add_row("gpu", str(config.gpu))
+    if config.devices:
+        table.add_row("devices", ", ".join(config.devices))
+    table.add_row("workspace_root", str(config.workspace_root))
+    table.add_row("restart_policy", config.restart_policy)
+    if config.base_image:
+        table.add_row("base_image", config.base_image)
+    if config.setup_script:
+        table.add_row("setup_script", config.setup_script)
+    if config.registry_image:
+        table.add_row("registry_image", config.registry_image)
+    if config.remote_peers:
+        table.add_row("remote_peers", ", ".join(config.remote_peers))
+    if config.ports:
+        table.add_row("ports", ", ".join(config.ports))
+    if config.extra_apt_packages:
+        table.add_row("extra_apt_packages", ", ".join(config.extra_apt_packages))
+    if config.locked_apt_packages:
+        table.add_row("locked_apt_packages (rosman.lock)", ", ".join(config.locked_apt_packages))
+    if config.locked_pip_packages:
+        table.add_row("locked_pip_packages (rosman.lock)", ", ".join(config.locked_pip_packages))
+
+    config_hash = compute_config_hash(config)
+    image_tag = image_name(
+        config.workspace_root, config.ros_distro, config_hash, config.registry_image
+    )
+    table.add_row("image tag", image_tag)
+    table.add_row("container name", container_name(config.workspace_root))
+
+    try:
+        client = get_client()
+        manager = ContainerManager(client, state)
+        container = manager.find_container(config)
+        if container is not None:
+            container.reload()
+            table.add_row("container status", container.status)
+    except RosmanError:
+        pass  # config-only introspection shouldn't fail just because Docker isn't reachable
+
+    console.print(table)
+    return 0
+
+
+def _format_size(num_bytes: int) -> str:
+    size = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.1f}{unit}" if unit != "B" else f"{int(size)}B"
+        size /= 1024
+    return f"{size:.1f}GB"
+
+
+def cmd_prune(args: argparse.Namespace) -> int:
+    """Removes rosman-built images no longer referenced by any existing
+    container -- these accumulate silently over time, since a config
+    change (rosman.yml, rosman.lock, or a rosman upgrade that bumps
+    DOCKERFILE_TEMPLATE_VERSION) produces a new hash-tagged image and
+    nothing else ever removes the old one. A global operation (not scoped
+    to the current workspace), since a deleted workspace's old images are
+    exactly as orphaned as a rebuilt one's.
+    """
+    from rosman.docker_client import get_client
+    from rosman.lifecycle import list_prunable_images, remove_images
+
+    client = get_client()
+    candidates = list_prunable_images(client)
+
+    if not candidates:
+        console.print("Nothing to prune -- no unreferenced rosman-managed images found.")
+        return 0
+
+    total_size = sum(image.attrs.get("Size", 0) for image in candidates)
+    console.print(
+        f"Found {len(candidates)} unreferenced rosman image(s), "
+        f"{_format_size(total_size)} total:"
+    )
+    for image in candidates:
+        tags = ", ".join(image.tags) if image.tags else image.short_id
+        console.print(f"  - {tags} ({_format_size(image.attrs.get('Size', 0))})")
+
+    if not args.yes:
+        if not sys.stdin.isatty():
+            err_console.print(
+                "[yellow]Non-interactive session -- pass --yes to actually remove these.[/yellow]"
+            )
+            return 0
+        try:
+            answer = input("Remove these images? [y/N] ")
+        except EOFError:
+            err_console.print("[yellow]No input available -- not removing anything.[/yellow]")
+            return 0
+        if answer.strip().lower() not in ("y", "yes"):
+            console.print("Aborted.")
+            return 0
+
+    removed_count, reclaimed = remove_images(client, candidates)
+    console.print(
+        f"[green]Removed[/green] {removed_count} image(s), reclaimed {_format_size(reclaimed)}."
+    )
+    return 0
+
+
 def cmd_rebuild(args: argparse.Namespace) -> int:
     from rosman.docker_client import get_client
     from rosman.lifecycle import ContainerManager
@@ -235,10 +381,40 @@ def cmd_rebuild(args: argparse.Namespace) -> int:
     return 0
 
 
+def _fix_config_drift(config: RosmanConfig) -> None:
+    """The one thing `rosman doctor --fix` actually auto-fixes: config
+    drift. Everything else doctor reports is either informational (gpu,
+    multi-host LAN) or needs something outside rosman entirely (a usbipd
+    bind, which needs Windows-side admin rights rosman has no reliable
+    way to trigger non-interactively) -- scoped narrow deliberately,
+    rather than attempt something that could silently fail needing
+    elevation.
+    """
+    from rosman.docker_client import get_client
+    from rosman.lifecycle import ContainerManager
+
+    try:
+        client = get_client()
+    except RosmanError:
+        return  # let the normal checks below report the daemon issue
+    manager = ContainerManager(client, RosmanState.load())
+    container = manager.find_container(config)
+    if container is None:
+        return
+    container.reload()
+    if not manager.detect_drift(container, config).drifted:
+        return
+    console.print("[yellow]--fix: config has drifted, rebuilding...[/yellow]")
+    manager.rebuild(config, reporter=RichReporter(console))
+    console.print("[green]--fix: rebuilt.[/green]")
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     from rosman.doctor import run_checks
 
     config = _load_config_or_exit()
+    if args.fix:
+        _fix_config_drift(config)
     checks = run_checks(config, network_check=args.network_check)
     ok = True
     for check in checks:
@@ -456,6 +632,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_status = subparsers.add_parser("status", help="List rosman-managed containers")
     p_status.set_defaults(func=cmd_status)
 
+    p_config = subparsers.add_parser(
+        "config", help="Show the fully resolved effective config for this workspace"
+    )
+    p_config.set_defaults(func=cmd_config)
+
+    p_prune = subparsers.add_parser(
+        "prune", help="Remove rosman-built images no longer used by any container"
+    )
+    p_prune.add_argument("-y", "--yes", action="store_true", help="Skip the confirmation prompt")
+    p_prune.set_defaults(func=cmd_prune)
+
     p_rebuild = subparsers.add_parser("rebuild", help="Force-recreate the workspace container")
     p_rebuild.add_argument("-y", "--yes", action="store_true", help="Skip the confirmation prompt")
     p_rebuild.set_defaults(func=cmd_rebuild)
@@ -466,6 +653,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Also spin up two ephemeral containers and verify a pub/sub round trip "
         "over the generated CycloneDDS peers (slower; may pull the base ros image)",
+    )
+    p_doctor.add_argument(
+        "--fix",
+        action="store_true",
+        help="Automatically rebuild if config drift is found, before reporting checks. "
+        "Only fixes config drift -- every other check doctor reports is informational "
+        "or needs something outside rosman (e.g. usbipd) to actually resolve.",
     )
     p_doctor.set_defaults(func=cmd_doctor)
 

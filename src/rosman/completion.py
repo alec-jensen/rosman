@@ -56,7 +56,7 @@ _ARGCOMPLETE_IFS = "\013"
 _COMPLETE_TIMEOUT_SECONDS = 3
 
 RESERVED_COMMAND_NAMES = (
-    "init up down status rebuild doctor shell push completion help"
+    "init up down status config prune rebuild doctor shell push completion help"
 )
 
 # Not "reserved" in the sense above -- these *do* get containerized, just

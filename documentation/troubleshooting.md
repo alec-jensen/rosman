@@ -114,6 +114,13 @@ slow) first build, not after, and build/pull/push all show live progress.
 If you're seeing this on a current version, please open an issue — it
 means something regressed.
 
+**Docker is using a lot of disk space after using rosman for a while.**
+Every `rosman.yml`/`rosman.lock` change (or a rosman upgrade touching the
+image build template) produces a new, separately-tagged image — nothing
+removes the old one automatically. Run `rosman prune` to remove
+rosman-built images no longer used by any container; see [Cleaning up old
+images](guides/prune.md).
+
 ## Still stuck?
 
 Open an issue at

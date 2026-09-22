@@ -82,6 +82,7 @@ rosman colcon build
 rosman run demo_nodes_cpp talker
 rosman shell            # interactive shell in the container, if you need one
 rosman status            # see rosman-managed containers
+rosman config            # show the fully resolved effective config
 rosman doctor            # sanity-check your environment
 ```
 
@@ -93,23 +94,26 @@ every command after that reuses it. If you do want direct control:
 rosman up      # start (or create) the container explicitly
 rosman down    # stop it
 rosman rebuild # force-recreate it (e.g. after changing rosman.yml)
+rosman prune   # remove old images no longer used by any container
 ```
 
 Anything that isn't one of rosman's own subcommands (`init`, `up`, `down`,
-`status`, `rebuild`, `doctor`, `shell`, `push`, `completion`, `help`) is
-forwarded verbatim as `ros2 <args>` (or `colcon <args>`/`rosdep <args>` if
-the first word is `colcon`/`rosdep`) inside the workspace container —
-rosman does not reimplement the `ros2` CLI. Cloning source packages into
-`src/`? See [Building from source](guides/rosdep-lockfile.md) for
-`rosman rosdep install` before you hit a missing-dependency error at
-runtime.
+`status`, `config`, `prune`, `rebuild`, `doctor`, `shell`, `push`,
+`completion`, `help`) is forwarded verbatim as `ros2 <args>` (or `colcon
+<args>`/`rosdep <args>` if the first word is `colcon`/`rosdep`) inside the
+workspace container — rosman does not reimplement the `ros2` CLI. Cloning
+source packages into `src/`? See [Building from
+source](guides/rosdep-lockfile.md) for `rosman rosdep install` before you
+hit a missing-dependency error at runtime.
 
 If `rosman.yml`/`rosman.lock` has changed since the container was built,
 any command that would use it asks whether to rebuild first —
 interactively; in a non-interactive session (no tty, e.g. a script or CI)
 it just warns and keeps using the existing container rather than blocking
-on a prompt nothing can answer.
+on a prompt nothing can answer. `rosman doctor --fix` does the same
+rebuild automatically as part of a health check.
 
 Next: turn on [tab-completion](guides/tab-completion.md), skim the
-[configuration reference](configuration.md), or jump straight to
-[examples](examples.md) for a setup close to yours.
+[configuration reference](configuration.md), jump straight to
+[examples](examples.md) for a setup close to yours, or see
+[cleaning up old images](guides/prune.md) once you've rebuilt a few times.

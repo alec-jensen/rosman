@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import os
 import platform
+import re
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -398,6 +399,72 @@ class ImageResult:
     source: str  # "cached" | "pulled" | "built"
 
 
+# Matches tags from images built *before* MANAGED_LABEL was added at
+# build time (`rosman/<distro>-<workspace_hash>:<config_hash>`, see
+# naming.image_name) -- a fallback so upgrading to `rosman prune` doesn't
+# leave every pre-existing image invisible to it just because it predates
+# labeling. Doesn't cover `registry_image`-tagged images built before this
+# either, since those have no distinguishing prefix at all; those only
+# become prunable once rebuilt/repushed with the new labeled version.
+_LEGACY_IMAGE_TAG_RE = re.compile(r"^rosman/[a-z0-9-]+-[0-9a-f]{8}:[0-9a-f]{12}$")
+
+
+def list_managed_images(client: docker.DockerClient) -> list:
+    """Every rosman-built image on this machine, across all workspaces --
+    both labeled (built since `rosman prune` support was added) and
+    legacy (identified by tag pattern instead, see
+    `_LEGACY_IMAGE_TAG_RE`)."""
+    labeled = client.images.list(filters={"label": f"{MANAGED_LABEL}=true"})
+    labeled_ids = {image.id for image in labeled}
+    legacy = [
+        image
+        for image in client.images.list()
+        if image.id not in labeled_ids
+        and any(_LEGACY_IMAGE_TAG_RE.match(tag) for tag in (image.tags or []))
+    ]
+    return labeled + legacy
+
+
+def list_prunable_images(client: docker.DockerClient) -> list:
+    """rosman-managed images not referenced by any existing container
+    (running or stopped) -- safe to remove regardless of *why* they're
+    orphaned (a config change produced a new hash-tagged image and the
+    old one was never cleaned up, or the workspace itself was deleted
+    entirely). Never removes an image a live container still depends on."""
+    referenced_ids = {c.attrs["Image"] for c in client.containers.list(all=True)}
+    return [image for image in list_managed_images(client) if image.id not in referenced_ids]
+
+
+def remove_images(client: docker.DockerClient, images: list) -> tuple[int, int]:
+    """Removes exactly the images given (the same list already shown to
+    the user for confirmation, not recomputed -- avoids any race between
+    preview and removal). Returns (count_removed, bytes_reclaimed);
+    skips (doesn't raise) any image that fails to remove, e.g. because
+    something referenced it in the meantime.
+
+    Removes by *tag*, one at a time, not by bare image ID -- confirmed
+    live that several small rosman workspaces with identical config
+    commonly produce byte-identical images sharing one ID under many
+    different repo names, and `remove(image_id, force=False)` refuses
+    outright ("image is referenced in multiple repositories") whenever
+    more than one tag points at it. Untagging each reference in turn (the
+    same thing `docker rmi tag1 tag2 ...` does) removes the underlying
+    image once its last tag is gone, without ever needing `force=True`.
+    """
+    removed_count = 0
+    reclaimed_bytes = 0
+    for image in images:
+        refs = image.tags or [image.id]
+        try:
+            for ref in refs:
+                client.images.remove(ref, force=False)
+        except (APIError, NotFound):
+            continue
+        removed_count += 1
+        reclaimed_bytes += image.attrs.get("Size", 0)
+    return removed_count, reclaimed_bytes
+
+
 class ContainerManager:
     def __init__(self, client: docker.DockerClient, state: RosmanState):
         self.client = client
@@ -451,9 +518,15 @@ class ContainerManager:
             (build_dir / "Dockerfile").write_text(dockerfile)
             if setup_script_source is not None:
                 shutil.copy(setup_script_source, build_dir / SETUP_SCRIPT_CONTAINER_NAME)
+            image_labels = {
+                MANAGED_LABEL: "true",
+                WORKSPACE_LABEL: str(config.workspace_root),
+                DISTRO_LABEL: config.ros_distro,
+                CONFIG_HASH_LABEL: config_hash,
+            }
             try:
                 build_stream = self.client.api.build(
-                    path=str(build_dir), tag=tag, rm=True, decode=True
+                    path=str(build_dir), tag=tag, rm=True, decode=True, labels=image_labels
                 )
                 reporter.build(build_stream)
             except (APIError, DockerStreamError) as exc:

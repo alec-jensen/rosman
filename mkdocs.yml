@@ -43,6 +43,7 @@ nav:
       - Multi-host (LAN): guides/multi-host.md
       - Shell tab-completion: guides/tab-completion.md
       - GPU, GUIs & devices: guides/gpu-gui-devices.md
+      - Cleaning up (rosman prune): guides/prune.md
   - Examples: examples.md
   - Troubleshooting: troubleshooting.md
 
