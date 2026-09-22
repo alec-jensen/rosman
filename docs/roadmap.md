@@ -919,3 +919,34 @@ usbipd-attached device is *not* auto-fixed, since `usbipd bind` needs
 Windows-side admin elevation rosman has no reliable way to trigger
 non-interactively; attempting it and silently failing would be worse than
 not attempting it and saying so.
+
+## Man page (2026-09-22, v0.4.1)
+
+Alec: "should we make a man page also," while the v0.4.0 work above was
+still in flight. Worth doing specifically because rosman ships as real
+system packages (apt/dnf/pacman) -- `man <tool>` after installing via a
+package manager is standard Linux convention.
+
+`packaging/generate-manpage.sh` generates it via `argparse-manpage`,
+pointed straight at `rosman.cli.build_parser` -- the *same* parser
+`--help` and tab-completion already use -- rather than a hand-written
+page that would inevitably drift the first time a subcommand's flags
+changed. Verified this covers everything correctly by generating a real
+page and rendering it through `man -l` directly: every reserved
+subcommand (including the brand new `config`/`prune`/`doctor --fix` from
+the same release) showed up automatically, correctly, with zero manual
+editing. One cleanup needed: `__complete` (backs shell completion, never
+meant to be run directly) still appeared in the raw SYNOPSIS choices list
+even though `argparse.SUPPRESS` already keeps it out of `--help` and out
+of getting its own man-page section -- `argparse.SUPPRESS` only affects
+help text generation, not the raw subparser choices list argparse-manpage
+reads directly. Fixed with a one-line `sed` strip in the generation
+script rather than touching `build_parser()` itself.
+
+Wired into `.github/workflows/release.yml`'s existing `build` job (a new
+step right after the standalone binary build, before the `dist/` artifact
+upload) and `packaging/nfpm.yaml` (packaged to
+`/usr/share/man/man1/rosman.1.gz`, gzipped first to match standard man
+page packaging convention). Shipped as its own patch release (v0.4.1) --
+packaging/tooling polish, not a new CLI capability, matching this
+project's minor-for-features/patch-for-everything-else convention.

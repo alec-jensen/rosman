@@ -45,6 +45,13 @@ jobs:
       - name: Build standalone Linux binary
         run: bash packaging/build-binary.sh dist/rosman-linux-x86_64
 
+      # Generated straight from build_parser() (see the script) -- can't
+      # drift from --help/completion the way a hand-written page would.
+      - name: Generate man page
+        run: |
+          bash packaging/generate-manpage.sh "${{ steps.version.outputs.version }}" dist/rosman.1
+          gzip -f dist/rosman.1
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist

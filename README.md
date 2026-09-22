@@ -61,6 +61,10 @@ raw binary/wheel from a [GitHub release](https://github.com/alec-jensen/rosman/r
 and prints a one-line notice when one's available — it never blocks,
 fails, or interrupts scripted/CI usage.
 
+The apt/dnf/pacman packages also install a man page — `man rosman` —
+generated directly from rosman's own CLI parser, so it can't drift from
+`--help`.
+
 ### From source
 
 ```sh

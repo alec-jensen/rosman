@@ -55,6 +55,10 @@ grab a raw binary/wheel from a
 You need Docker itself already working (Docker Engine on Linux, Docker
 Desktop on Windows) — rosman drives Docker, it doesn't install it.
 
+The apt/dnf/pacman packages also install a man page (`man rosman`),
+generated directly from rosman's own CLI parser so it can't drift from
+`--help`.
+
 ## Your first workspace
 
 ```sh
