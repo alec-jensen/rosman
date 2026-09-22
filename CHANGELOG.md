@@ -5,6 +5,14 @@ See [GitHub Releases](https://github.com/alec-jensen/rosman/releases) for
 downloadable artifacts, and [docs/roadmap.md](docs/roadmap.md) for the
 full build/verification history behind each entry.
 
+## v0.4.6 — 2026-09-22
+
+### Fixed
+
+- Failed image builds now show the complete Docker build output, including
+  stdout and stderr from a custom `setup_script`, instead of only the
+  command's exit code.
+
 ## v0.4.5 — 2026-09-22
 
 ### Added

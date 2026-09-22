@@ -1,4 +1,5 @@
 import argparse
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -11,6 +12,7 @@ from rosman.cli import (
     _ensure_running_with_notice,
     _fix_config_drift,
     _maybe_show_update_notice,
+    _run_command,
     build_parser,
     cmd_config,
     cmd_init,
@@ -42,6 +44,23 @@ def render_table_text(table) -> str:
     recorder = RichConsole(record=True, width=200)
     recorder.print(table)
     return recorder.export_text()
+
+
+def test_command_error_preserves_literal_build_output(monkeypatch):
+    import rosman.cli as cli_mod
+
+    output = StringIO()
+    monkeypatch.setattr(
+        cli_mod,
+        "err_console",
+        RichConsole(file=output, force_terminal=False, color_system=None),
+    )
+
+    def fail():
+        raise RosmanError("Docker build output:\n[setup] missing dependency")
+
+    assert _run_command(fail) == 1
+    assert "[setup] missing dependency" in output.getvalue()
 
 
 def test_cmd_init_creates_config(tmp_path: Path):

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from rosman import __version__
 from rosman.completion import BASH_SCRIPT, ZSH_SCRIPT
@@ -745,7 +746,7 @@ def _run_command(command: Callable[[], int]) -> int:
     try:
         return command()
     except RosmanError as exc:
-        err_console.print(f"[red]{exc}[/red]")
+        err_console.print(Text(str(exc), style="red"))
         return 1
     except Exception as exc:
         from docker.errors import DockerException

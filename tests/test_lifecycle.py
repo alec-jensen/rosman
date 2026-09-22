@@ -320,6 +320,28 @@ def test_ensure_image_builds_locally_without_registry_image(tmp_path: Path):
     client.api.pull.assert_not_called()
 
 
+def test_ensure_image_failure_shows_full_setup_script_output(tmp_path: Path):
+    (tmp_path / "setup.sh").write_text("#!/bin/sh\nexit 42\n")
+    client = MagicMock()
+    client.images.get.side_effect = ImageNotFound("not found locally")
+    diagnostic = "setup.sh: permission denied [" + "x" * 150 + "]"
+    client.api.build.return_value = iter(
+        [
+            {"stream": f"{diagnostic}\n"},
+            {"error": "The command returned a non-zero code: 42"},
+        ]
+    )
+    manager = make_manager(tmp_path, client)
+    config = make_config(tmp_path, "setup_script: setup.sh\n")
+
+    with pytest.raises(ContainerError) as error:
+        manager.ensure_image(config, "abc123")
+
+    assert diagnostic in str(error.value)
+    assert "non-zero code: 42" in str(error.value)
+    assert "Docker build output:" in str(error.value)
+
+
 def test_push_image_requires_registry_image_configured(tmp_path: Path):
     manager = make_manager(tmp_path)
     config = make_config(tmp_path)

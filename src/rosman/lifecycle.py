@@ -546,11 +546,16 @@ class ContainerManager:
                 build_succeeded = True
             except (APIError, DockerStreamError) as exc:
                 base = config.base_image or f"ros:{config.ros_distro}"
-                raise ContainerError(
+                message = (
                     f"Failed to build image for ros_distro '{config.ros_distro}': {exc}\n"
-                    f"Check that '{base}' is a valid image and, if set, that "
-                    f"setup_script '{config.setup_script}' runs cleanly."
-                ) from exc
+                    f"Check that '{base}' is a valid image."
+                )
+                if config.setup_script:
+                    message += f" Check that setup_script '{config.setup_script}' runs cleanly."
+                if isinstance(exc, DockerStreamError) and exc.build_output:
+                    log_output = exc.build_output.rstrip("\n")
+                    message += f"\n\nDocker build output:\n{log_output}"
+                raise ContainerError(message) from exc
             finally:
                 reporter.build_finished(time.perf_counter() - started, build_succeeded)
         return ImageResult(tag=tag, source="built")

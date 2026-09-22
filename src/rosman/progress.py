@@ -11,7 +11,8 @@ or when stdout isn't a tty, without importing `rich` there.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from tempfile import SpooledTemporaryFile
 from typing import Protocol
 
 from rich.console import Console
@@ -35,8 +36,11 @@ _TERMINAL_LAYER_STATUSES = {
 
 
 class DockerStreamError(Exception):
-    """An `{"error": ...}` (or `errorDetail`) entry surfaced by a decoded
-    Docker build/pull/push stream."""
+    """An `{"error": ...}` (or `errorDetail`) entry in a Docker stream."""
+
+    def __init__(self, message: str, build_output: str = "") -> None:
+        super().__init__(message)
+        self.build_output = build_output
 
 
 def _raise_on_error(chunk: dict) -> None:
@@ -45,6 +49,32 @@ def _raise_on_error(chunk: dict) -> None:
     detail = chunk.get("errorDetail")
     if detail:
         raise DockerStreamError(detail.get("message", str(detail)))
+
+
+def _consume_build_stream(stream: Iterable[dict], on_output: Callable[[str], None]) -> None:
+    """Keep the complete Docker build log in a temporary file.
+
+    Successful builds discard it. On failure, attach it to the exception
+    so callers can show the output from the failing RUN step, including
+    stderr from a custom setup script.
+    """
+    with SpooledTemporaryFile(mode="w+t", max_size=1024 * 1024, encoding="utf-8") as output:
+        try:
+            for chunk in stream:
+                text = chunk.get("stream") or ""
+                if text:
+                    output.write(text)
+                    on_output(text)
+                _raise_on_error(chunk)
+        except Exception as exc:
+            # Keep docker-py out of the normal import path; it is only
+            # needed here when the stream itself fails.
+            from docker.errors import APIError
+
+            if not isinstance(exc, (DockerStreamError, APIError)):
+                raise
+            output.seek(0)
+            raise DockerStreamError(str(exc), build_output=output.read()) from exc
 
 
 class ProgressReporter(Protocol):
@@ -58,8 +88,7 @@ class NullReporter:
     """Drains a decoded Docker stream without displaying anything."""
 
     def build(self, stream: Iterable[dict]) -> None:
-        for chunk in stream:
-            _raise_on_error(chunk)
+        _consume_build_stream(stream, lambda text: None)
 
     def build_finished(self, elapsed_seconds: float, succeeded: bool) -> None:
         pass
@@ -91,11 +120,12 @@ class RichReporter:
             transient=True,
         ) as progress:
             task = progress.add_task("Building image...", total=None)
-            for chunk in stream:
-                _raise_on_error(chunk)
-                text = (chunk.get("stream") or "").strip()
-                if text:
-                    progress.update(task, description=text[:100])
+            def show_latest(text: str) -> None:
+                latest = text.strip().splitlines()[-1] if text.strip() else ""
+                if latest:
+                    progress.update(task, description=latest[:100])
+
+            _consume_build_stream(stream, show_latest)
 
     def build_finished(self, elapsed_seconds: float, succeeded: bool) -> None:
         message = (

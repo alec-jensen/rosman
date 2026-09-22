@@ -20,6 +20,11 @@ Desktop (Windows) is running, and that your user has permission to talk to
 it (on Linux, being in the `docker` group; a fresh group membership needs
 a new login session to take effect, not just a new terminal).
 
+**An image build fails while running `setup_script`.** Rosman prints
+the full Docker build output beneath the failure summary, including the
+script's stdout and stderr. Check those lines for the failing command and
+its diagnostic message.
+
 **A build hangs for a long time with no error, using a custom
 `base_image`.** A bare (non-ROS) base image doesn't set
 `DEBIAN_FRONTEND=noninteractive` on its own, and an interactive `tzdata`
