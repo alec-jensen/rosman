@@ -76,6 +76,15 @@ jobs:
           name: dist
           path: dist/
 
+      # upload-artifact resets regular files to 0644. Restore the complete
+      # PyInstaller tree from its tarball so the executable (and any other
+      # executable files) keep their original modes in every native package.
+      - name: Restore bundle permissions
+        run: |
+          rm -rf dist/rosman-linux-x86_64
+          tar -C dist -xzf dist/rosman-linux-x86_64.tar.gz
+          test -x dist/rosman-linux-x86_64/rosman
+
       - name: Install nfpm
         run: |
           curl -sL "https://github.com/goreleaser/nfpm/releases/download/v2.47.0/nfpm_2.47.0_Linux_x86_64.tar.gz" \
@@ -103,8 +112,15 @@ jobs:
         # it's also needed unquoted inside a heredoc line.)
         run: |
           docker run --rm -e VERSION -v "$PWD/dist:/dist" -v /tmp/gnupg:/gpghome fedora:latest bash -c '
-            set -e
-            dnf install -y -q rpm-sign > /dev/null
+            set -euo pipefail
+            dnf install -y -q rpm-sign cpio > /dev/null
+            # Check the RPM payload itself, not just the unpacked build tree.
+            # A non-executable rosman must stop the release before publishing.
+            mkdir -p /tmp/rosman-rpm-check
+            cd /tmp/rosman-rpm-check
+            rpm2cpio /dist/rosman-${VERSION}-1.x86_64.rpm | cpio -idm --no-absolute-filenames --quiet
+            test -x usr/lib/rosman/rosman
+            test "$(readlink usr/bin/rosman)" = /usr/lib/rosman/rosman
             cat > /root/.rpmmacros << MACROS
           %_gpg_path /gpghome
           %_gpg_digest_algo sha256

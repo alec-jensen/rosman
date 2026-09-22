@@ -5,6 +5,16 @@ See [GitHub Releases](https://github.com/alec-jensen/rosman/releases) for
 downloadable artifacts, and [docs/roadmap.md](docs/roadmap.md) for the
 full build/verification history behind each entry.
 
+## v0.4.4 — 2026-09-22
+
+### Fixed
+
+- Restore executable file modes from the preserved release tarball before
+  building apt, dnf, and pacman packages. GitHub Actions artifact transfer
+  stripped those modes and made the v0.4.3 package-manager installs unusable.
+- Check the finished RPM's executable and symlink before signing, so a broken
+  package cannot be published again.
+
 ## v0.4.3 — 2026-09-22
 
 ### Performance
