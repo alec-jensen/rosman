@@ -98,6 +98,13 @@ jobs:
           nfpm package --config packaging/nfpm.yaml --target dist/ --packager rpm
           nfpm package --config packaging/nfpm.yaml --target dist/ --packager archlinux
 
+      - name: Verify .deb executable
+        run: |
+          mkdir -p /tmp/rosman-deb-check
+          dpkg-deb -x "dist/rosman_${VERSION}_amd64.deb" /tmp/rosman-deb-check
+          test -x /tmp/rosman-deb-check/usr/lib/rosman/rosman
+          test "$(readlink /tmp/rosman-deb-check/usr/bin/rosman)" = /usr/lib/rosman/rosman
+
       - name: Import release signing key
         run: |
           mkdir -p /tmp/gnupg && chmod 700 /tmp/gnupg
@@ -133,7 +140,13 @@ jobs:
       - name: Sign the pacman package
         run: |
           docker run --rm -e VERSION -v "$PWD/dist:/dist" -v /tmp/gnupg:/gpghome archlinux:latest bash -c '
-            set -e
+            set -euo pipefail
+            # Check the package payload before signing or publishing it.
+            mkdir -p /tmp/rosman-pacman-check
+            cd /tmp/rosman-pacman-check
+            bsdtar -xf /dist/rosman-${VERSION}-1-x86_64.pkg.tar.zst
+            test -x usr/lib/rosman/rosman
+            test "$(readlink usr/bin/rosman)" = /usr/lib/rosman/rosman
             gpg --homedir /gpghome --batch --pinentry-mode loopback \
               --passphrase "${{ secrets.RELEASE_GPG_PASSPHRASE }}" \
               --local-user '"$GPG_KEY_ID"' --detach-sign \
