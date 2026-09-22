@@ -878,6 +878,7 @@ than <code>ros_distro</code>.</p>
 rosman<span class="w"> </span>colcon<span class="w"> </span>build
 rosman<span class="w"> </span>run<span class="w"> </span>demo_nodes_cpp<span class="w"> </span>talker
 rosman<span class="w"> </span>shell<span class="w">            </span><span class="c1"># interactive shell in the container, if you need one</span>
+rosman<span class="w"> </span>shell<span class="w"> </span>ls<span class="w"> </span>-la<span class="w">     </span><span class="c1"># run one command there and return its exit code</span>
 rosman<span class="w"> </span>status<span class="w">            </span><span class="c1"># see rosman-managed containers</span>
 rosman<span class="w"> </span>config<span class="w">            </span><span class="c1"># show the fully resolved effective config</span>
 rosman<span class="w"> </span>doctor<span class="w">            </span><span class="c1"># sanity-check your environment</span>
@@ -889,7 +890,7 @@ when it finishes or fails. If you do want direct control:</p>
 <div class="highlight"><pre><span></span><code>rosman<span class="w"> </span>up<span class="w">      </span><span class="c1"># start (or create) the container explicitly</span>
 rosman<span class="w"> </span>down<span class="w">    </span><span class="c1"># stop it</span>
 rosman<span class="w"> </span>rebuild<span class="w"> </span><span class="c1"># force-recreate it (e.g. after changing rosman.yml)</span>
-rosman<span class="w"> </span>prune<span class="w">   </span><span class="c1"># remove old images no longer used by any container</span>
+rosman<span class="w"> </span>prune<span class="w">   </span><span class="c1"># remove old images, keeping each workspace's latest</span>
 </code></pre></div>
 <p>Anything that isn't one of rosman's own subcommands (<code>init</code>, <code>up</code>, <code>down</code>,
 <code>status</code>, <code>config</code>, <code>prune</code>, <code>rebuild</code>, <code>doctor</code>, <code>shell</code>, <code>push</code>,

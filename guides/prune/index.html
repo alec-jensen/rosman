@@ -843,18 +843,19 @@ content-hash-tagged image. Nothing removes the old one automatically, so
 these accumulate over time. On a machine used for real development, this
 adds up fast: several gigabytes per stale image, times however many
 config changes and rebuilds have happened.</p>
-<p><code>rosman prune</code> removes rosman-built images that no longer have <strong>any</strong>
-existing container referencing them — running or stopped — regardless of
-<em>why</em> they became orphaned:</p>
-<ul>
-<li>A config change produced a new hash-tagged image, and the container
-  was rebuilt against it, leaving the old image tag behind with nothing
-  using it.</li>
-<li>The workspace itself was deleted from disk entirely, but its
-  container/image never got explicitly removed first.</li>
-</ul>
+<p><code>rosman prune</code> removes older rosman-built images while preserving the
+newest image for each existing workspace, even if no container uses it
+yet. It also preserves every image referenced by a running or stopped
+container.</p>
+<p>A config change may leave an older image with no container. Images from
+a workspace deleted from disk can also be cleaned up. Rosman identifies
+workspaces from image labels and, for images created before those labels
+existed, from their tags. When an older image's workspace path cannot be
+recovered, rosman keeps the newest image in that tag group to avoid
+deleting a workspace's only available image. Shared registry image tags
+receive the same conservative treatment.</p>
 <div class="highlight"><pre><span></span><code>$<span class="w"> </span>rosman<span class="w"> </span>prune
-Found<span class="w"> </span><span class="m">6</span><span class="w"> </span>unreferenced<span class="w"> </span>rosman<span class="w"> </span>image<span class="o">(</span>s<span class="o">)</span>,<span class="w"> </span><span class="m">7</span>.2GB<span class="w"> </span>total:
+Found<span class="w"> </span><span class="m">6</span><span class="w"> </span>old,<span class="w"> </span>unused<span class="w"> </span>rosman<span class="w"> </span>image<span class="o">(</span>s<span class="o">)</span>,<span class="w"> </span><span class="m">7</span>.2GB<span class="w"> </span>total:
 <span class="w">  </span>-<span class="w"> </span>rosman/humble-00a95c48:1b8c0353fb15<span class="w"> </span><span class="o">(</span><span class="m">1</span>.4GB<span class="o">)</span>
 <span class="w">  </span>-<span class="w"> </span>rosman/humble-3fb2f057:475f136f54fb<span class="w"> </span><span class="o">(</span><span class="m">1</span>.4GB<span class="o">)</span>
 <span class="w">  </span>...
@@ -862,22 +863,15 @@ Remove<span class="w"> </span>these<span class="w"> </span>images?<span class="w
 Removed<span class="w"> </span><span class="m">6</span><span class="w"> </span>image<span class="o">(</span>s<span class="o">)</span>,<span class="w"> </span>reclaimed<span class="w"> </span><span class="m">7</span>.2GB.
 </code></pre></div>
 <h2 id="why-its-safe">Why it's safe<a class="headerlink" href="#why-its-safe" title="Permanent link">&para;</a></h2>
-<p><code>rosman prune</code> only ever removes an image with <strong>zero</strong> container
-references — an image any container (even a stopped one you might still
-want) still points at is never touched. This is the same standard as
-<code>docker image prune</code>'s own dangling-image cleanup, just scoped to
-rosman-built images specifically (identified by a build-time label, with
-a tag-pattern fallback for images built before that label existed) rather
-than truly untagged ones — which is why <code>rosman prune</code> finds real,
-reclaimable space that plain <code>docker system prune</code> won't, since a
-rosman-built image always has a real tag and is never "dangling" in
-Docker's own sense.</p>
+<p>The candidate list excludes images used by any existing container and
+each workspace's latest image. Rosman removes only its own managed
+images, identified by a build-time label or an older rosman tag pattern.
+It previews candidates and their sizes before asking for confirmation.</p>
 <h2 id="scope">Scope<a class="headerlink" href="#scope" title="Permanent link">&para;</a></h2>
-<p>It's a <strong>global</strong> operation, not scoped to the current workspace or
-directory — a deleted workspace's orphaned images are exactly as safe (and
-worth) cleaning up as a rebuilt one's, and there's no reliable way to
-enumerate "only this workspace's old images" that would also catch the
-deleted-workspace case.</p>
+<p>Pruning is global across workspaces. For labeled local images, deleting
+a workspace makes all of its unreferenced images eligible. Legacy and
+shared registry tags may retain one image when Docker metadata cannot
+reliably identify the workspace path.</p>
 <h2 id="non-interactive-use">Non-interactive use<a class="headerlink" href="#non-interactive-use" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>rosman<span class="w"> </span>prune<span class="w"> </span>--yes<span class="w">   </span><span class="c1"># or -y</span>
 </code></pre></div>
