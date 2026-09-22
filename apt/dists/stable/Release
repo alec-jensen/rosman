@@ -5,13 +5,13 @@ Codename: stable
 Architectures: amd64
 Components: main
 Description: rosman package repository (https://github.com/alec-jensen/rosman)
-Date: Tue, 22 Sep 2026 16:00:26 UTC
+Date: Tue, 22 Sep 2026 16:06:54 UTC
 MD5Sum:
- 11430d2b14d17f4067fed9ad6f77ea30 5382 main/binary-amd64/Packages
- c340dd3d4fda16049464ba363a070a02 1331 main/binary-amd64/Packages.gz
+ f3981cff07ff1789fbddde65349b1faa 5980 main/binary-amd64/Packages
+ 013a81c368b0a6316e2cefb2f45ba090 1433 main/binary-amd64/Packages.gz
 SHA1:
- 37bbdadd5e8f2777958853fed164a1be1196cde7 5382 main/binary-amd64/Packages
- 252758094df69d6a9e7cefd77e8a7985473b1dc5 1331 main/binary-amd64/Packages.gz
+ ad88bb10366fc1ee6c25ebe14cf4ce74610ce5bf 5980 main/binary-amd64/Packages
+ a0285c71a28c2b6fb193eb18d6a3ab2605d579e0 1433 main/binary-amd64/Packages.gz
 SHA256:
- 34467525d0891ee6c710d326ab3f7e6c40841c705f1b00a515659d8484625ac9 5382 main/binary-amd64/Packages
- 7ee6f5caee6caeb32dd9a9aaac33ad2f3cef3696d29cd7cf798928d0770ba8e2 1331 main/binary-amd64/Packages.gz
+ 8d50df3408ba89665f7430209d6c5205f8f00cffb7c41ce723756bfc90201278 5980 main/binary-amd64/Packages
+ fb9f4b975030ec5018c7c956f6c46adb9de17bcd71dd0daf83714da84d1b6b13 1433 main/binary-amd64/Packages.gz
