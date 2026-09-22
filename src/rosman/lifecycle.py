@@ -26,6 +26,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import docker
 from docker.errors import APIError, ImageNotFound, NotFound
@@ -381,11 +382,11 @@ def list_prunable_images(client: docker.DockerClient) -> list:
     registry tags without a recoverable workspace path keep their newest
     image as a conservative fallback."""
 
-    def attrs_of(image: object) -> dict:
+    def attrs_of(image: Any) -> dict:
         attrs = image.attrs
         return attrs if isinstance(attrs, dict) else {}
 
-    def created_at(image: object) -> float:
+    def created_at(image: Any) -> float:
         created = attrs_of(image).get("Created")
         if isinstance(created, (int, float)):
             return float(created)
@@ -409,7 +410,7 @@ def list_prunable_images(client: docker.DockerClient) -> list:
         if workspace:
             workspace_by_hash[workspace_hash(Path(workspace))] = workspace
 
-    newest_by_group: dict[tuple[str, str], object] = {}
+    newest_by_group: dict[tuple[str, str], Any] = {}
     for image in images:
         labels = (attrs_of(image).get("Config") or {}).get("Labels") or {}
         workspace = labels.get(WORKSPACE_LABEL)
