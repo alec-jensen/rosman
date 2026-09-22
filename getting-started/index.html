@@ -858,6 +858,9 @@ grab a raw binary/wheel from a
 <a href="https://github.com/alec-jensen/rosman/releases">GitHub release</a>.</p>
 <p>You need Docker itself already working (Docker Engine on Linux, Docker
 Desktop on Windows) — rosman drives Docker, it doesn't install it.</p>
+<p>The apt/dnf/pacman packages also install a man page (<code>man rosman</code>),
+generated directly from rosman's own CLI parser so it can't drift from
+<code>--help</code>.</p>
 <h2 id="your-first-workspace">Your first workspace<a class="headerlink" href="#your-first-workspace" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>my-ros2-project
 rosman<span class="w"> </span>init<span class="w"> </span>--distro<span class="w"> </span>humble
