@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://alec-jensen.github.io/rosman/guides/team-images/">
+        <link rel="canonical" href="https://alec-jensen.github.io/rosman/guides/prune/">
       
       
-        <link rel="prev" href="../rosdep-lockfile/">
+        <link rel="prev" href="../gpu-gui-devices/">
       
       
-        <link rel="next" href="../multi-host/">
+        <link rel="next" href="../../examples/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Team-shared images - rosman</title>
+        <title>Cleaning up (rosman prune) - rosman</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#team-shared-images" class="md-skip">
+        <a href="#cleaning-up-rosman-prune" class="md-skip">
           Skip to content
         </a>
       
@@ -114,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Team-shared images
+              Cleaning up (rosman prune)
             
           </span>
         </div>
@@ -478,37 +478,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Team-shared images
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../team-images/" class="md-nav__link">
         
   
   
@@ -524,37 +497,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#why-file-permissions-still-work" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Why file permissions still work
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -648,10 +590,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../prune/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cleaning up (rosman prune)
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -667,6 +636,59 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-its-safe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why it's safe
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-interactive-use" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-interactive use
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -760,10 +782,32 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#why-file-permissions-still-work" class="md-nav__link">
+  <a href="#why-its-safe" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Why file permissions still work
+        Why it's safe
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-interactive-use" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-interactive use
       
     </span>
   </a>
@@ -790,39 +834,57 @@
   
 
 
-<h1 id="team-shared-images">Team-shared images<a class="headerlink" href="#team-shared-images" title="Permanent link">&para;</a></h1>
-<p>If a project's image takes a while to build (a heavy <code>setup_script</code>, lots
-of <code>extra_apt_packages</code>), you don't want every teammate rebuilding it
-independently. rosman still builds the image itself —
-<code>registry_image</code> just controls where the <em>result</em> is cached, so a team
-shares one build instead of everyone repeating it.</p>
-<div class="highlight"><pre><span></span><code><span class="nt">registry_image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ghcr.io/my-team/my-project</span><span class="w">   </span><span class="c1"># no tag -- rosman appends its own</span>
+<h1 id="cleaning-up-rosman-prune">Cleaning up: rosman prune<a class="headerlink" href="#cleaning-up-rosman-prune" title="Permanent link">&para;</a></h1>
+<div class="highlight"><pre><span></span><code>rosman<span class="w"> </span>prune
 </code></pre></div>
-<div class="highlight"><pre><span></span><code>rosman<span class="w"> </span>push<span class="w">   </span><span class="c1"># builds (if needed) and pushes -- once, after `docker login ghcr.io`</span>
-rosman<span class="w"> </span>up<span class="w">     </span><span class="c1"># teammates: pulls the pushed image instead of building locally</span>
+<p>Every change to <code>rosman.yml</code>/<code>rosman.lock</code> — or a rosman upgrade that
+touches the image build template — produces a new, distinctly
+content-hash-tagged image. Nothing removes the old one automatically, so
+these accumulate over time. On a machine used for real development, this
+adds up fast: several gigabytes per stale image, times however many
+config changes and rebuilds have happened.</p>
+<p><code>rosman prune</code> removes rosman-built images that no longer have <strong>any</strong>
+existing container referencing them — running or stopped — regardless of
+<em>why</em> they became orphaned:</p>
+<ul>
+<li>A config change produced a new hash-tagged image, and the container
+  was rebuilt against it, leaving the old image tag behind with nothing
+  using it.</li>
+<li>The workspace itself was deleted from disk entirely, but its
+  container/image never got explicitly removed first.</li>
+</ul>
+<div class="highlight"><pre><span></span><code>$<span class="w"> </span>rosman<span class="w"> </span>prune
+Found<span class="w"> </span><span class="m">6</span><span class="w"> </span>unreferenced<span class="w"> </span>rosman<span class="w"> </span>image<span class="o">(</span>s<span class="o">)</span>,<span class="w"> </span><span class="m">7</span>.2GB<span class="w"> </span>total:
+<span class="w">  </span>-<span class="w"> </span>rosman/humble-00a95c48:1b8c0353fb15<span class="w"> </span><span class="o">(</span><span class="m">1</span>.4GB<span class="o">)</span>
+<span class="w">  </span>-<span class="w"> </span>rosman/humble-3fb2f057:475f136f54fb<span class="w"> </span><span class="o">(</span><span class="m">1</span>.4GB<span class="o">)</span>
+<span class="w">  </span>...
+Remove<span class="w"> </span>these<span class="w"> </span>images?<span class="w"> </span><span class="o">[</span>y/N<span class="o">]</span><span class="w"> </span>y
+Removed<span class="w"> </span><span class="m">6</span><span class="w"> </span>image<span class="o">(</span>s<span class="o">)</span>,<span class="w"> </span>reclaimed<span class="w"> </span><span class="m">7</span>.2GB.
 </code></pre></div>
-<p><code>rosman up</code> (and the auto-start on any passthrough command) tries a pull
-first whenever <code>registry_image</code> is set, falling back to a local build only
-if nothing's been pushed yet or the registry isn't reachable. Registry
-auth is your own <code>docker login</code> — rosman doesn't manage credentials.</p>
-<div class="admonition note">
-<p class="admonition-title">This is not \"bring your own image\"</p>
-<p>rosman always builds the image itself from <code>rosman.yml</code>
-(<code>ros:&lt;distro&gt;</code>, or <code>base_image</code> + <code>setup_script</code>). <code>registry_image</code>
-only changes where the <em>result</em> is cached — you can't point rosman at
-an arbitrary pre-built image and skip its own build. That would
-reintroduce exactly the "everyone manages their own image slightly
-differently" problem rosman exists to remove.</p>
-</div>
-<h2 id="why-file-permissions-still-work">Why file permissions still work<a class="headerlink" href="#why-file-permissions-still-work" title="Permanent link">&para;</a></h2>
-<p>The image bakes in a fixed internal identity (not whoever happened to
-build it) — each machine's actual host UID/GID is applied at container
-<em>runtime</em>, so bind-mounted workspace files still come out correctly owned
-regardless of who built the shared image. This is also what makes the
-image's content-hash tag reusable across different builders in the first
-place: if the image baked in the builder's own UID, two teammates with
-different UIDs building the identical <code>rosman.yml</code> would get two different
-image tags, with nothing to actually share.</p>
+<h2 id="why-its-safe">Why it's safe<a class="headerlink" href="#why-its-safe" title="Permanent link">&para;</a></h2>
+<p><code>rosman prune</code> only ever removes an image with <strong>zero</strong> container
+references — an image any container (even a stopped one you might still
+want) still points at is never touched. This is the same standard as
+<code>docker image prune</code>'s own dangling-image cleanup, just scoped to
+rosman-built images specifically (identified by a build-time label, with
+a tag-pattern fallback for images built before that label existed) rather
+than truly untagged ones — which is why <code>rosman prune</code> finds real,
+reclaimable space that plain <code>docker system prune</code> won't, since a
+rosman-built image always has a real tag and is never "dangling" in
+Docker's own sense.</p>
+<h2 id="scope">Scope<a class="headerlink" href="#scope" title="Permanent link">&para;</a></h2>
+<p>It's a <strong>global</strong> operation, not scoped to the current workspace or
+directory — a deleted workspace's orphaned images are exactly as safe (and
+worth) cleaning up as a rebuilt one's, and there's no reliable way to
+enumerate "only this workspace's old images" that would also catch the
+deleted-workspace case.</p>
+<h2 id="non-interactive-use">Non-interactive use<a class="headerlink" href="#non-interactive-use" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>rosman<span class="w"> </span>prune<span class="w"> </span>--yes<span class="w">   </span><span class="c1"># or -y</span>
+</code></pre></div>
+<p>Without <code>-y</code>/<code>--yes</code>, an interactive session prompts before removing
+anything; a non-interactive session (no tty — a script or CI) just prints
+what it would remove and exits without removing anything, so passing
+<code>--yes</code> is required there.</p>
 
 
 

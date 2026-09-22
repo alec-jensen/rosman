@@ -582,6 +582,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/prune/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cleaning up (rosman prune)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -877,6 +905,12 @@ workspace, with no output.</strong> This was a real bug, since fixed: the
 slow) first build, not after, and build/pull/push all show live progress.
 If you're seeing this on a current version, please open an issue — it
 means something regressed.</p>
+<p><strong>Docker is using a lot of disk space after using rosman for a while.</strong>
+Every <code>rosman.yml</code>/<code>rosman.lock</code> change (or a rosman upgrade touching the
+image build template) produces a new, separately-tagged image — nothing
+removes the old one automatically. Run <code>rosman prune</code> to remove
+rosman-built images no longer used by any container; see <a href="../guides/prune/">Cleaning up old
+images</a>.</p>
 <h2 id="still-stuck">Still stuck?<a class="headerlink" href="#still-stuck" title="Permanent link">&para;</a></h2>
 <p>Open an issue at
 <a href="https://github.com/alec-jensen/rosman/issues">github.com/alec-jensen/rosman/issues</a>

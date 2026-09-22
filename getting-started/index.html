@@ -653,6 +653,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/prune/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cleaning up (rosman prune)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -848,6 +876,7 @@ rosman<span class="w"> </span>colcon<span class="w"> </span>build
 rosman<span class="w"> </span>run<span class="w"> </span>demo_nodes_cpp<span class="w"> </span>talker
 rosman<span class="w"> </span>shell<span class="w">            </span><span class="c1"># interactive shell in the container, if you need one</span>
 rosman<span class="w"> </span>status<span class="w">            </span><span class="c1"># see rosman-managed containers</span>
+rosman<span class="w"> </span>config<span class="w">            </span><span class="c1"># show the fully resolved effective config</span>
 rosman<span class="w"> </span>doctor<span class="w">            </span><span class="c1"># sanity-check your environment</span>
 </code></pre></div>
 <p>You never have to explicitly start anything — the first <code>rosman &lt;command&gt;</code>
@@ -856,23 +885,26 @@ every command after that reuses it. If you do want direct control:</p>
 <div class="highlight"><pre><span></span><code>rosman<span class="w"> </span>up<span class="w">      </span><span class="c1"># start (or create) the container explicitly</span>
 rosman<span class="w"> </span>down<span class="w">    </span><span class="c1"># stop it</span>
 rosman<span class="w"> </span>rebuild<span class="w"> </span><span class="c1"># force-recreate it (e.g. after changing rosman.yml)</span>
+rosman<span class="w"> </span>prune<span class="w">   </span><span class="c1"># remove old images no longer used by any container</span>
 </code></pre></div>
 <p>Anything that isn't one of rosman's own subcommands (<code>init</code>, <code>up</code>, <code>down</code>,
-<code>status</code>, <code>rebuild</code>, <code>doctor</code>, <code>shell</code>, <code>push</code>, <code>completion</code>, <code>help</code>) is
-forwarded verbatim as <code>ros2 &lt;args&gt;</code> (or <code>colcon &lt;args&gt;</code>/<code>rosdep &lt;args&gt;</code> if
-the first word is <code>colcon</code>/<code>rosdep</code>) inside the workspace container —
-rosman does not reimplement the <code>ros2</code> CLI. Cloning source packages into
-<code>src/</code>? See <a href="../guides/rosdep-lockfile/">Building from source</a> for
-<code>rosman rosdep install</code> before you hit a missing-dependency error at
-runtime.</p>
+<code>status</code>, <code>config</code>, <code>prune</code>, <code>rebuild</code>, <code>doctor</code>, <code>shell</code>, <code>push</code>,
+<code>completion</code>, <code>help</code>) is forwarded verbatim as <code>ros2 &lt;args&gt;</code> (or <code>colcon
+&lt;args&gt;</code>/<code>rosdep &lt;args&gt;</code> if the first word is <code>colcon</code>/<code>rosdep</code>) inside the
+workspace container — rosman does not reimplement the <code>ros2</code> CLI. Cloning
+source packages into <code>src/</code>? See <a href="../guides/rosdep-lockfile/">Building from
+source</a> for <code>rosman rosdep install</code> before you
+hit a missing-dependency error at runtime.</p>
 <p>If <code>rosman.yml</code>/<code>rosman.lock</code> has changed since the container was built,
 any command that would use it asks whether to rebuild first —
 interactively; in a non-interactive session (no tty, e.g. a script or CI)
 it just warns and keeps using the existing container rather than blocking
-on a prompt nothing can answer.</p>
+on a prompt nothing can answer. <code>rosman doctor --fix</code> does the same
+rebuild automatically as part of a health check.</p>
 <p>Next: turn on <a href="../guides/tab-completion/">tab-completion</a>, skim the
-<a href="../configuration/">configuration reference</a>, or jump straight to
-<a href="../examples/">examples</a> for a setup close to yours.</p>
+<a href="../configuration/">configuration reference</a>, jump straight to
+<a href="../examples/">examples</a> for a setup close to yours, or see
+<a href="../guides/prune/">cleaning up old images</a> once you've rebuilt a few times.</p>
 
 
 
