@@ -202,3 +202,20 @@ Description: Run ROS 2 anywhere without installing it natively.
  rosman transparently forwards ros2/colcon commands into a Docker
  container running the right ROS 2 distro for your project.
 
+Package: rosman
+Version: 0.4.4
+Architecture: amd64
+Maintainer: Alec Jensen
+Installed-Size: 22918
+Filename: pool/main/r/rosman/rosman_0.4.4_amd64.deb
+Size: 11249426
+MD5sum: b847fd1edfb391b629d5354bdf3a8dd4
+SHA1: 1bd9d97e44c17a41a7317289adb81cc878d9b7eb
+SHA256: 502a97c54a52fdd488eac5fc33bfd6806f9190a814797d2e348debc43c1691aa
+Section: utils
+Priority: optional
+Homepage: https://github.com/alec-jensen/rosman
+Description: Run ROS 2 anywhere without installing it natively.
+ rosman transparently forwards ros2/colcon commands into a Docker
+ container running the right ROS 2 distro for your project.
+
