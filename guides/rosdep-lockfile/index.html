@@ -821,7 +821,13 @@ wait — you can use them right away), and writes the result to
 <span class="nt">ros_distro</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">humble</span>
 <span class="nt">apt_packages</span><span class="p">:</span>
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ros-humble-example-interfaces</span>
+<span class="nt">pip_packages</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">some-vendor-sdk</span>
 </code></pre></div>
+<p>A dependency can resolve either way depending on whether Ubuntu packages
+it for apt — <code>rosman rosdep install</code> handles both automatically and locks
+whichever one rosdep actually resolved to (the default image includes
+<code>python3-pip</code> for exactly this).</p>
 <p>Run <code>rosman rebuild</code> afterward to bake those packages into the image
 itself — <code>rosman.lock</code> is folded into the build the same way
 <code>extra_apt_packages</code> is, so it survives rebuilds and is shared with your

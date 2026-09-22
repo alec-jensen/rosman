@@ -925,11 +925,11 @@ not mentioned come from <code>rosman.yml</code> as usual. The file is optional.<
 <h2 id="auto-generated-rosmanlock">Auto-generated: <code>rosman.lock</code><a class="headerlink" href="#auto-generated-rosmanlock" title="Permanent link">&para;</a></h2>
 <p>Unlike <code>rosman.local.yml</code>, this one <strong>is</strong> meant to be checked into git —
 it's produced by <a href="../guides/rosdep-lockfile/"><code>rosman rosdep install</code></a> and
-records the apt packages resolved from your workspace <code>src/</code> packages'
-declared dependencies, so a <code>colcon build</code>-from-source workflow stays
-reproducible and shared with your team instead of a one-off change to a
-single running container. Never hand-edit it; it's regenerated in full
-each time you run the command that produces it.</p>
+records the apt <em>and</em> pip packages resolved from your workspace <code>src/</code>
+packages' declared dependencies, so a <code>colcon build</code>-from-source workflow
+stays reproducible and shared with your team instead of a one-off change
+to a single running container. Never hand-edit it; it's regenerated in
+full each time you run the command that produces it.</p>
 
 
 
