@@ -42,8 +42,22 @@ def test_render_dockerfile_installs_and_initializes_rosdep(tmp_path: Path):
     config = make_config(tmp_path)
     dockerfile = render_dockerfile(config)
     assert "python3-rosdep" in dockerfile
+    assert "python3-pip" in dockerfile
     assert "rosdep init" in dockerfile
     assert "rosdep update" in dockerfile
+
+
+def test_render_dockerfile_no_pip_install_step_without_locked_pip_packages(tmp_path: Path):
+    config = make_config(tmp_path)
+    dockerfile = render_dockerfile(config)
+    assert "pip3 install --no-cache-dir" not in dockerfile
+
+
+def test_render_dockerfile_installs_locked_pip_packages(tmp_path: Path):
+    config = make_config(tmp_path)
+    config.locked_pip_packages = ["Adafruit-ADS1x15"]
+    dockerfile = render_dockerfile(config)
+    assert "PIP_BREAK_SYSTEM_PACKAGES=1 pip3 install --no-cache-dir Adafruit-ADS1x15" in dockerfile
 
 
 def test_render_dockerfile_includes_locked_apt_packages(tmp_path: Path):
@@ -137,6 +151,13 @@ def test_compute_config_hash_changes_with_locked_apt_packages(tmp_path: Path):
     plain = make_config(tmp_path)
     locked = make_config(tmp_path)
     locked.locked_apt_packages = ["ros-humble-example-interfaces"]
+    assert compute_config_hash(plain) != compute_config_hash(locked)
+
+
+def test_compute_config_hash_changes_with_locked_pip_packages(tmp_path: Path):
+    plain = make_config(tmp_path)
+    locked = make_config(tmp_path)
+    locked.locked_pip_packages = ["Adafruit-ADS1x15"]
     assert compute_config_hash(plain) != compute_config_hash(locked)
 
 

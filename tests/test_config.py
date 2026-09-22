@@ -404,6 +404,38 @@ def test_lock_distro_mismatch_is_a_config_error(tmp_path: Path):
         load_config(path)
 
 
+def test_write_lock_with_pip_packages(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    path.write_text(MINIMAL)
+    write_lock(path, "humble", ["ros-humble-example-interfaces"], ["Adafruit-ADS1x15"])
+
+    config = load_config(path)
+
+    assert config.locked_apt_packages == ["ros-humble-example-interfaces"]
+    assert config.locked_pip_packages == ["Adafruit-ADS1x15"]
+
+
+def test_no_lockfile_means_empty_locked_pip_packages(tmp_path: Path):
+    path = tmp_path / "rosman.yml"
+    config = parse_config(MINIMAL, path)
+    assert config.locked_pip_packages == []
+
+
+def test_old_lockfile_without_pip_packages_key_still_loads(tmp_path: Path):
+    # An old rosman.lock from before pip support existed had no
+    # pip_packages key at all -- must not break loading it.
+    path = tmp_path / "rosman.yml"
+    path.write_text(MINIMAL)
+    (tmp_path / "rosman.lock").write_text(
+        "ros_distro: humble\napt_packages: [\"ros-humble-example-interfaces\"]\n"
+    )
+
+    config = load_config(path)
+
+    assert config.locked_apt_packages == ["ros-humble-example-interfaces"]
+    assert config.locked_pip_packages == []
+
+
 def test_malformed_lock_apt_packages_is_a_config_error(tmp_path: Path):
     path = tmp_path / "rosman.yml"
     path.write_text(MINIMAL)

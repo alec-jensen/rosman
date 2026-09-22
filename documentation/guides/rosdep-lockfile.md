@@ -19,7 +19,14 @@ wait — you can use them right away), and writes the result to
 ros_distro: humble
 apt_packages:
   - ros-humble-example-interfaces
+pip_packages:
+  - some-vendor-sdk
 ```
+
+A dependency can resolve either way depending on whether Ubuntu packages
+it for apt — `rosman rosdep install` handles both automatically and locks
+whichever one rosdep actually resolved to (the default image includes
+`python3-pip` for exactly this).
 
 Run `rosman rebuild` afterward to bake those packages into the image
 itself — `rosman.lock` is folded into the build the same way

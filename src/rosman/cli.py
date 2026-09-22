@@ -248,10 +248,47 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def _offer_rebuild(manager: ContainerManager, config: RosmanConfig, container, drift):
+    """Surfaces config drift on an implicit auto-start (passthrough/shell),
+    which previously had no drift signal at all -- unlike `rosman up`,
+    which already refuses outright. Prompts interactively; in a
+    non-interactive session (no tty, or stdin already closed/piped), just
+    warns and keeps using the existing container rather than blocking a
+    scripted/CI invocation on a prompt that can never be answered."""
+    err_console.print(
+        f"[yellow]Container config has drifted from {config.config_path}:[/yellow]"
+    )
+    for reason in drift.reasons:
+        err_console.print(f"  - {reason}")
+    if not sys.stdin.isatty():
+        err_console.print(
+            "[yellow]Non-interactive session -- using the existing container as-is. "
+            "Run `rosman rebuild` to apply the change.[/yellow]"
+        )
+        return container
+    try:
+        answer = input("Rebuild now? [y/N] ")
+    except EOFError:
+        err_console.print(
+            "[yellow]No input available -- using the existing container as-is.[/yellow]"
+        )
+        return container
+    if answer.strip().lower() not in ("y", "yes"):
+        return container
+    console.print(f"Rebuilding container for this workspace ({config.ros_distro})...")
+    rebuilt = manager.rebuild(config, reporter=RichReporter(console))
+    console.print(f"[green]Rebuilt[/green] {rebuilt.name}")
+    return rebuilt
+
+
 def _ensure_running_with_notice(manager: ContainerManager, config: RosmanConfig):
     """Like ContainerManager.ensure_running, but prints the "starting" notice
     *before* a slow first-time build/create, not after -- otherwise an
     implicit auto-start on a passthrough/shell command looks like a hang.
+    Also checks for config drift on every call, not just `rosman up`/
+    `rosman doctor` -- otherwise a passthrough command silently keeps using
+    a stale container with no signal at all that rosman.yml/rosman.lock
+    changed since it was built.
     """
     container = manager.find_container(config)
     if container is None:
@@ -259,7 +296,12 @@ def _ensure_running_with_notice(manager: ContainerManager, config: RosmanConfig)
             f"Starting rosman container for this workspace ({config.ros_distro})..."
         )
         return manager.create_container(config, reporter=RichReporter(console)), True
+
     container.reload()
+    drift = manager.detect_drift(container, config)
+    if drift.drifted:
+        container = _offer_rebuild(manager, config, container, drift)
+
     if container.status != "running":
         container.start()
     return container, False
@@ -312,17 +354,23 @@ def cmd_rosdep_install(extra_args: list[str]) -> int:
     container, _ = _ensure_running_with_notice(manager, config)
 
     console.print("Resolving dependencies declared under src/ via rosdep...")
-    resolve_exit_code, packages, resolve_output = resolve_packages(container, extra_args)
+    resolve_exit_code, apt_packages, pip_packages, resolve_output = resolve_packages(
+        container, extra_args
+    )
     if resolve_exit_code != 0:
         err_console.print(
             f"[red]rosdep could not resolve dependencies:[/red]\n{resolve_output}"
         )
         return resolve_exit_code
-    if not packages:
+    # Check both lists, not just apt -- a workspace whose only unmet
+    # dependency resolves via pip previously fell through here as "nothing
+    # to install" even though it genuinely had something to do (see
+    # rosdep.py's parse_simulate_output docstring).
+    if not apt_packages and not pip_packages:
         console.print("Nothing to install -- all declared dependencies are already satisfied.")
         return 0
 
-    console.print(f"Installing: {', '.join(packages)}")
+    console.print(f"Installing: {', '.join(apt_packages + pip_packages)}")
     exit_code, output = install_packages(container, extra_args)
     if exit_code != 0:
         err_console.print(f"[red]rosdep install failed inside the container:[/red]\n{output}")
@@ -330,9 +378,10 @@ def cmd_rosdep_install(extra_args: list[str]) -> int:
 
     from rosman.config import write_lock
 
-    write_lock(config.config_path, config.ros_distro, packages)
+    write_lock(config.config_path, config.ros_distro, apt_packages, pip_packages)
+    total = len(apt_packages) + len(pip_packages)
     console.print(
-        f"[green]Wrote[/green] {len(packages)} package(s) to rosman.lock. "
+        f"[green]Wrote[/green] {total} package(s) to rosman.lock. "
         "Run `rosman rebuild` to bake them into the image (and check "
         "rosman.lock into git so your team gets them too)."
     )

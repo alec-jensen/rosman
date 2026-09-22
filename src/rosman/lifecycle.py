@@ -85,7 +85,7 @@ DEVICE_GROUPS = ["dialout", "video", "audio", "plugdev", "disk", "tty", "uucp"]
 # fields, so without this a rosman upgrade that fixes something in the
 # template would silently leave existing users on their old, buggy cached
 # image forever -- `rosman up` would just find the old tag and reuse it.
-DOCKERFILE_TEMPLATE_VERSION = 7
+DOCKERFILE_TEMPLATE_VERSION = 8
 
 # Ubuntu codename ROS 2 apt packages are published under for each distro, used
 # only when `base_image` overrides the default `ros:<distro>` image and rosman
@@ -187,6 +187,7 @@ def compute_config_hash(config: RosmanConfig) -> str:
             config.rmw_implementation,
             ",".join(sorted(config.extra_apt_packages)),
             ",".join(sorted(config.locked_apt_packages)),
+            ",".join(sorted(config.locked_pip_packages)),
             config.base_image or "",
             config.setup_script or "",
             _setup_script_digest(config),
@@ -282,6 +283,22 @@ def render_dockerfile(config: RosmanConfig) -> str:
     ros_profile_line = f"[ -f {ros_setup_path} ] && . {ros_setup_path}"
     ws_profile_line = f"[ -f {ws_setup_path} ] && . {ws_setup_path}"
 
+    pip_install_block = ""
+    if config.locked_pip_packages:
+        # Locked via `rosman rosdep install` -- see rosdep.py. Installed
+        # system-wide as root (we're still root at this point in the
+        # build, before any USER switch), not `--user`, so it doesn't
+        # depend on the arbitrary-UID/HOME-matching machinery at all.
+        # PIP_BREAK_SYSTEM_PACKAGES=1 mirrors exactly what rosdep's own
+        # pip installer does at runtime (confirmed against a real rosdep
+        # install: `sudo -H --preserve-env=PIP_BREAK_SYSTEM_PACKAGES pip3
+        # install ...`) -- needed on newer Ubuntu/Debian (PEP 668), a
+        # harmlessly-ignored env var on older ones that predate it.
+        pip_packages_str = " ".join(sorted(set(config.locked_pip_packages)))
+        pip_install_block = f"""
+RUN PIP_BREAK_SYSTEM_PACKAGES=1 pip3 install --no-cache-dir {pip_packages_str}
+"""
+
     setup_block = ""
     if config.setup_script:
         # Run as the rosman user, not root: installers that write into the
@@ -318,14 +335,14 @@ RUN (getent group {IMAGE_GID} || groupadd --gid {IMAGE_GID} {DEFAULT_USERNAME}) 
         || groupadd --system "$grp"; done) \\
     && apt-get update \\
     && apt-get install -y --no-install-recommends \\
-        sudo python3-colcon-common-extensions python3-rosdep \\
+        sudo python3-colcon-common-extensions python3-rosdep python3-pip \\
         ros-{config.ros_distro}-rmw-cyclonedds-cpp{install_extra} \\
     && echo "ALL ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/rosman \\
     && chmod 0440 /etc/sudoers.d/rosman \\
     && rm -rf /var/lib/apt/lists/* \\
     && (rosdep init || true) \\
     && su -l {DEFAULT_USERNAME} -c "rosdep update"
-
+{pip_install_block}
 # Everything below is world-writable/-readable rather than owned by a
 # specific UID: the image's baked identity ({IMAGE_UID}:{IMAGE_GID}) is
 # deliberately not tied to whichever host UID actually runs the container

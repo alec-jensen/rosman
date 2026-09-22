@@ -62,8 +62,8 @@ not mentioned come from `rosman.yml` as usual. The file is optional.
 
 Unlike `rosman.local.yml`, this one **is** meant to be checked into git —
 it's produced by [`rosman rosdep install`](guides/rosdep-lockfile.md) and
-records the apt packages resolved from your workspace `src/` packages'
-declared dependencies, so a `colcon build`-from-source workflow stays
-reproducible and shared with your team instead of a one-off change to a
-single running container. Never hand-edit it; it's regenerated in full
-each time you run the command that produces it.
+records the apt *and* pip packages resolved from your workspace `src/`
+packages' declared dependencies, so a `colcon build`-from-source workflow
+stays reproducible and shared with your team instead of a one-off change
+to a single running container. Never hand-edit it; it's regenerated in
+full each time you run the command that produces it.

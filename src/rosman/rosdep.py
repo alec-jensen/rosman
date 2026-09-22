@@ -35,45 +35,70 @@ def _rosdep_command(extra_args: list[str], simulate: bool) -> str:
     return " ".join(p for p in parts if p)
 
 
-def parse_simulate_output(text: str) -> list[str]:
-    """Parses rosdep's own `--simulate` output, e.g.:
+def _extract_packages(line_tokens: list[str], marker_tokens: set[str]) -> list[str] | None:
+    """If this line's tokens contain every token in `marker_tokens` plus
+    "install", returns the non-flag tokens after "install" (the package
+    names); otherwise None."""
+    if not marker_tokens.issubset(line_tokens) or "install" not in line_tokens:
+        return None
+    idx = line_tokens.index("install")
+    return [t for t in line_tokens[idx + 1 :] if not t.startswith("-")]
+
+
+def parse_simulate_output(text: str) -> tuple[list[str], list[str]]:
+    """Parses rosdep's own `--simulate` output. Two installer types have
+    been confirmed against a real rosdep install, one package per line
+    each (rosdep doesn't currently combine multiple packages onto one
+    command line, but this handles that shape too in case a future
+    version does):
 
         #[apt] Installation commands:
           sudo -H apt-get install -y ros-humble-example-interfaces
-          sudo -H apt-get install -y ros-humble-turtlesim
 
-    (Verified against a real rosdep install, one package per line --
-    doesn't currently combine multiple packages onto one command line, but
-    this handles that shape too in case a future rosdep version does.)
+        #[pip] Installation commands:
+          sudo -H --preserve-env=PIP_BREAK_SYSTEM_PACKAGES pip3 install -U Adafruit-ADS1x15
+
+    Returns `(apt_packages, pip_packages)` -- a package declared via
+    `exec_depend` can resolve to *either* installer depending on whether
+    Ubuntu packages it for apt, and treating pip-resolved deps as if they
+    were apt-resolved (or silently dropping them) previously made
+    `rosman rosdep install` claim "nothing to install" for a workspace
+    whose only unmet dependency was pip-only -- confirmed live against a
+    real rosdep key (`adafruit-ads1x15-pip`) before this fix.
     """
-    packages: list[str] = []
+    apt_packages: list[str] = []
+    pip_packages: list[str] = []
     for line in text.splitlines():
         tokens = line.split()
-        if "apt-get" not in tokens or "install" not in tokens:
+        apt_match = _extract_packages(tokens, {"apt-get"})
+        if apt_match is not None:
+            apt_packages.extend(apt_match)
             continue
-        idx = tokens.index("install")
-        for token in tokens[idx + 1 :]:
-            if not token.startswith("-"):
-                packages.append(token)
-    return sorted(set(packages))
+        pip_match = _extract_packages(tokens, {"pip3"}) or _extract_packages(tokens, {"pip"})
+        if pip_match is not None:
+            pip_packages.extend(pip_match)
+    return sorted(set(apt_packages)), sorted(set(pip_packages))
 
 
-def resolve_packages(container, extra_args: list[str]) -> tuple[int, list[str], str]:
-    """Dry-run rosdep to get the resolved apt package list without
+def resolve_packages(
+    container, extra_args: list[str]
+) -> tuple[int, list[str], list[str], str]:
+    """Dry-run rosdep to get the resolved apt/pip package lists without
     installing anything yet.
 
-    Returns `(exit_code, packages, output)` rather than just the package
-    list -- confirmed against a real container that an unresolvable
-    rosdep key (a typo, or a package not in the rosdistro index) makes
-    `--simulate` exit 1 with a clear error and *no* "apt-get install"
-    lines. Silently treating that the same as "nothing to install" would
-    misreport a real failure as full success -- the caller must check
-    `exit_code` before trusting an empty `packages` list.
+    Returns `(exit_code, apt_packages, pip_packages, output)` rather than
+    just the package lists -- confirmed against a real container that an
+    unresolvable rosdep key (a typo, or a package not in the rosdistro
+    index) makes `--simulate` exit 1 with a clear error and no
+    installation-command lines at all. Silently treating that the same as
+    "nothing to install" would misreport a real failure as full success --
+    the caller must check `exit_code` before trusting empty package lists.
     """
     command = _rosdep_command(extra_args, simulate=True)
     exit_code, output = container.exec_run(["bash", "-lc", command])
     text = output.decode(errors="replace")
-    return exit_code, parse_simulate_output(text), text
+    apt_packages, pip_packages = parse_simulate_output(text)
+    return exit_code, apt_packages, pip_packages, text
 
 
 def install_packages(container, extra_args: list[str]) -> tuple[int, str]:

@@ -1,8 +1,14 @@
 import argparse
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from rosman.cli import GITIGNORE_ENTRY, _maybe_show_update_notice, cmd_init
+from rosman.cli import (
+    GITIGNORE_ENTRY,
+    _ensure_running_with_notice,
+    _maybe_show_update_notice,
+    cmd_init,
+)
+from rosman.lifecycle import DriftReport
 
 
 def make_args(path: Path, distro: str = "humble", force: bool = False) -> argparse.Namespace:
@@ -94,3 +100,81 @@ def test_update_notice_prints_when_available():
         _maybe_show_update_notice()
     mock_print.assert_called_once()
     assert "a new version exists" in mock_print.call_args[0][0]
+
+
+def _make_manager(drifted: bool, reasons=("ros_distro changed",)):
+    manager = MagicMock()
+    container = MagicMock()
+    container.status = "running"
+    manager.find_container.return_value = container
+    manager.detect_drift.return_value = DriftReport(drifted=drifted, reasons=list(reasons))
+    return manager, container
+
+
+def test_ensure_running_no_prompt_when_no_drift():
+    manager, container = _make_manager(drifted=False)
+    with patch("builtins.input") as mock_input:
+        result, created = _ensure_running_with_notice(manager, MagicMock(config_path="x.yml"))
+    mock_input.assert_not_called()
+    manager.rebuild.assert_not_called()
+    assert result is container
+    assert created is False
+
+
+def test_ensure_running_rebuilds_on_yes(tmp_path: Path):
+    manager, container = _make_manager(drifted=True)
+    rebuilt = MagicMock()
+    manager.rebuild.return_value = rebuilt
+    config = MagicMock(config_path=tmp_path / "rosman.yml", ros_distro="humble")
+
+    with (
+        patch("sys.stdin.isatty", return_value=True),
+        patch("builtins.input", return_value="y"),
+    ):
+        result, _ = _ensure_running_with_notice(manager, config)
+
+    manager.rebuild.assert_called_once()
+    assert result is rebuilt
+
+
+def test_ensure_running_keeps_existing_on_no(tmp_path: Path):
+    manager, container = _make_manager(drifted=True)
+    config = MagicMock(config_path=tmp_path / "rosman.yml", ros_distro="humble")
+
+    with (
+        patch("sys.stdin.isatty", return_value=True),
+        patch("builtins.input", return_value="n"),
+    ):
+        result, _ = _ensure_running_with_notice(manager, config)
+
+    manager.rebuild.assert_not_called()
+    assert result is container
+
+
+def test_ensure_running_skips_prompt_when_not_a_tty(tmp_path: Path):
+    manager, container = _make_manager(drifted=True)
+    config = MagicMock(config_path=tmp_path / "rosman.yml", ros_distro="humble")
+
+    with (
+        patch("sys.stdin.isatty", return_value=False),
+        patch("builtins.input") as mock_input,
+    ):
+        result, _ = _ensure_running_with_notice(manager, config)
+
+    mock_input.assert_not_called()
+    manager.rebuild.assert_not_called()
+    assert result is container
+
+
+def test_ensure_running_keeps_existing_on_eof(tmp_path: Path):
+    manager, container = _make_manager(drifted=True)
+    config = MagicMock(config_path=tmp_path / "rosman.yml", ros_distro="humble")
+
+    with (
+        patch("sys.stdin.isatty", return_value=True),
+        patch("builtins.input", side_effect=EOFError),
+    ):
+        result, _ = _ensure_running_with_notice(manager, config)
+
+    manager.rebuild.assert_not_called()
+    assert result is container

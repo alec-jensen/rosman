@@ -104,6 +104,12 @@ rosman does not reimplement the `ros2` CLI. Cloning source packages into
 `rosman rosdep install` before you hit a missing-dependency error at
 runtime.
 
+If `rosman.yml`/`rosman.lock` has changed since the container was built,
+any command that would use it asks whether to rebuild first —
+interactively; in a non-interactive session (no tty, e.g. a script or CI)
+it just warns and keeps using the existing container rather than blocking
+on a prompt nothing can answer.
+
 Next: turn on [tab-completion](guides/tab-completion.md), skim the
 [configuration reference](configuration.md), or jump straight to
 [examples](examples.md) for a setup close to yours.

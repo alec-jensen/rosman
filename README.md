@@ -93,6 +93,11 @@ rosman does not reimplement the `ros2` CLI. `rosdep install` specifically
 is the one exception: see [Building packages from
 source](#building-packages-from-source-rosdep--rosmanlock) below.
 
+If `rosman.yml`/`rosman.lock` has changed since the container was built,
+any command that would use it (not just `rosman up`) asks whether to
+rebuild first — interactively; in a non-interactive session it just warns
+and keeps using the existing container.
+
 ## Config: `rosman.yml`
 
 ```yaml
@@ -172,6 +177,8 @@ the result to `rosman.lock`:
 ros_distro: humble
 apt_packages:
   - ros-humble-example-interfaces
+pip_packages:
+  - some-vendor-sdk    # a dependency rosdep resolves via pip instead of apt
 ```
 
 `rosman.lock` is folded into the image build the same way

@@ -779,3 +779,76 @@ container testing alone -- worth remembering the pattern: check a
 platform-reliability claim against current, dated sources before
 accepting or rejecting it, especially when the original reasoning was
 itself platform-specific and time-sensitive.
+
+## Drift prompts on every command, container-stop investigation, pip rosdep fix (2026-09-22, v0.3.1)
+
+Alec, after using rosman for real for a few days: "can we detect when any
+commands are run if the build parameters have changed and prompt y/n for
+a rebuild? and, make sure everything exits cleanly if the container is
+stopped while stuff is running."
+
+**Drift-on-every-command**: previously, config drift was only checked by
+`rosman up` (hard refuse unless `--force`) and reported by `rosman
+doctor`. Passthrough/`rosman shell` had *no* drift signal at all --
+`_ensure_running_with_notice` just found-or-created the container, so
+editing `rosman.yml` (or running `rosman rosdep install`, which writes
+`rosman.lock`) and then running an ordinary passthrough command silently
+kept using the stale container/image with no indication anything had
+changed. Fixed with `cli._offer_rebuild`: checks drift on every call to
+`_ensure_running_with_notice`, prompts `[y/N]` interactively, and in a
+non-interactive session (`sys.stdin.isatty()` false) just warns and
+proceeds with the existing container rather than blocking a script/CI
+invocation on an unanswerable prompt. Deliberately left `rosman up`'s own
+existing (stricter, hard-refuse-unless---force) behavior untouched --
+that's a different, already-considered UX choice for an explicit
+lifecycle command, not a gap.
+
+**"Exits cleanly if the container is stopped mid-command"**: investigated
+directly against real containers rather than assumed broken or written
+defensively. Three scenarios tested:
+- A long-running passthrough command (`docker exec`, process-replaced via
+  `os.execvp`) with the container `docker stop`'d mid-run: exits with 137
+  within ~2s. Already `docker`'s own process, not rosman's -- nothing to
+  fix.
+- `container.exec_run()` (used by `rosdep.py`/`doctor.py`) killed
+  mid-call: returns cleanly with exit code 137, no exception, no hang.
+- `container.exec_run()` called against an already-stopped container:
+  raises a clean `docker.errors.APIError` (409 Conflict) immediately,
+  already caught by `main()`'s existing `except DockerException` handler
+  (a one-line red message, no raw traceback).
+
+No bug found in any of these -- docker-py's own semantics plus rosman's
+existing exception handling already covered this. Reported the finding
+honestly rather than add unneeded defensive code for a problem that
+didn't reproduce.
+
+**Real bug found and fixed while investigating** (not what was reported,
+but the same failure class): `rosman rosdep install` claimed "nothing to
+install" for a workspace whose only unmet dependency resolved via `pip`
+instead of `apt` -- confirmed live with a real rosdep key
+(`adafruit-ads1x15-pip`) declared in a test `package.xml`. Root cause,
+found by direct testing rather than reading the parser and guessing:
+`pip` wasn't even installed in the default image (a pip-type rosdep
+install failed outright with "pip is not installed"), and separately,
+`parse_simulate_output` only recognized `apt-get install` lines, so a
+resolved pip package was silently invisible even once pip was manually
+installed -- `cmd_rosdep_install` then took its "nothing to do" branch
+and never called the real install at all. Fixed:
+- Default image now installs `python3-pip` alongside `python3-rosdep`.
+- `parse_simulate_output` recognizes both installer types (confirmed the
+  real pip command shape against a live container:
+  `sudo -H --preserve-env=PIP_BREAK_SYSTEM_PACKAGES pip3 install -U
+  <pkg>`, distinct enough from the apt shape that both parse
+  unambiguously), returning `(apt_packages, pip_packages)`.
+- `rosman.lock` gained a `pip_packages:` key alongside `apt_packages:`
+  (old lockfiles without the key still load fine, defaulting to empty).
+- `render_dockerfile` bakes locked pip packages in via `pip3 install
+  --no-cache-dir` with `PIP_BREAK_SYSTEM_PACKAGES=1` (mirrors rosdep's own
+  runtime install exactly, needed on newer Ubuntu/Debian's PEP 668
+  protection, harmlessly ignored on older ones), installed system-wide as
+  root rather than `--user`, sidestepping the arbitrary-UID/HOME-matching
+  machinery entirely.
+- Live-verified the full loop: a pip-only dependency was correctly
+  resolved, installed immediately, written to `rosman.lock`, and baked
+  into a `rosman rebuild`d image, confirmed importable in the fresh
+  container.
