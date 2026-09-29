@@ -36,6 +36,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"rosman {__version__}")
         return 0
 
+    if len(argv) == 2 and argv[0] == "completion" and argv[1] in ("bash", "zsh"):
+        # Eval'd from rc files on every new shell: import nothing heavy.
+        from rosman.completion_scripts import BASH_SCRIPT, ZSH_SCRIPT
+
+        sys.stdout.write(BASH_SCRIPT if argv[1] == "bash" else ZSH_SCRIPT)
+        return 0
+
     if argv and argv[0] == "__complete":
         return _complete(argv[1:])
     if len(argv) == 2 and argv[0] == "__check_update":

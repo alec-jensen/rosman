@@ -5,6 +5,15 @@ See [GitHub Releases](https://github.com/alec-jensen/rosman/releases) for
 downloadable artifacts, and [docs/roadmap.md](docs/roadmap.md) for the
 full build/verification history behind each entry.
 
+## v0.4.7 — 2026-09-29
+
+### Changed
+
+- `eval "$(rosman completion bash|zsh)"` in an rc file is much faster: it
+  no longer imports the full CLI (~0.07s per shell start, down from ~0.3s
+  cold). The zsh script also skips `compinit` when a framework such as
+  oh-my-zsh has already run it.
+
 ## v0.4.6 — 2026-09-22
 
 ### Fixed
