@@ -5,6 +5,28 @@ See [GitHub Releases](https://github.com/alec-jensen/rosman/releases) for
 downloadable artifacts, and [docs/roadmap.md](docs/roadmap.md) for the
 full build/verification history behind each entry.
 
+## v0.5.0 — 2026-09-29
+
+### Added
+
+- `gpu: auto` plus an optional `no_gpu:` block for teams where not everyone
+  has an NVIDIA GPU. With a GPU, the shared settings apply; without one,
+  `gpu` turns off and every field under `no_gpu:` (e.g. `base_image: null`,
+  a different `setup_script`) replaces the shared value. GPU and non-GPU
+  setups build separate images and both work with `registry_image`.
+  `gpu: true` still means "require it". `ROSMAN_GPU=0|1` overrides detection.
+  See the GPU guide.
+
+### Changed
+
+- Warm `rosman <ros2 command>` is roughly 2x faster (~1.25s to ~0.65s for
+  `topic list`): the container's login-shell environment is captured once
+  and passed to `docker exec` directly instead of starting `bash -lc` on
+  every command (refreshed automatically after `colcon build` or a
+  container rebuild); container status is read straight from the Docker
+  socket instead of spawning `docker inspect`; and parsed `rosman.yml` is
+  cached so PyYAML is no longer imported on warm commands.
+
 ## v0.4.8 — 2026-09-29
 
 ### Added

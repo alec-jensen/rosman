@@ -13,7 +13,7 @@ from rosman.docker_labels import (
     REMOTE_PEERS_LABEL,
     RESTART_POLICY_LABEL,
 )
-from rosman.fast_dispatch import _inspect, try_fast_passthrough
+from rosman.fast_dispatch import _inspect_cli, try_fast_passthrough
 from rosman.runtime_config import compute_config_hash
 
 
@@ -37,10 +37,11 @@ def matching_labels(config) -> dict[str, str]:
 def test_inspect_parses_status_and_labels(monkeypatch):
     result = MagicMock(
         returncode=0,
-        stdout="true\n" + json.dumps({DISTRO_LABEL: "humble"}) + "\n",
+        stdout="abc123\ntrue\n" + json.dumps({DISTRO_LABEL: "humble"}) + "\n",
     )
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: result)
-    assert _inspect("/usr/bin/docker", "container") == (
+    assert _inspect_cli("/usr/bin/docker", "container") == (
+        "abc123",
         True,
         {DISTRO_LABEL: "humble"},
     )
@@ -49,7 +50,7 @@ def test_inspect_parses_status_and_labels(monkeypatch):
 def test_inspect_returns_none_on_failure(monkeypatch):
     result = MagicMock(returncode=1, stdout="")
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: result)
-    assert _inspect("/usr/bin/docker", "container") is None
+    assert _inspect_cli("/usr/bin/docker", "container") is None
 
 
 def test_warm_matching_container_dispatches_without_full_lifecycle(tmp_path: Path, monkeypatch):
@@ -57,11 +58,12 @@ def test_warm_matching_container_dispatches_without_full_lifecycle(tmp_path: Pat
     monkeypatch.setattr("rosman.fast_dispatch.resolve_config", lambda: config)
     monkeypatch.setattr("rosman.fast_dispatch.shutil.which", lambda name: "/usr/bin/docker")
     monkeypatch.setattr(
-        "rosman.fast_dispatch._inspect", lambda docker, name: (True, matching_labels(config))
+        "rosman.fast_dispatch._inspect", lambda docker, name: ("id", True, matching_labels(config))
     )
     monkeypatch.setattr("rosman.fast_dispatch._maybe_update", lambda state: None)
     dispatched = MagicMock(return_value=42)
     monkeypatch.setattr("rosman.fast_dispatch.dispatch_passthrough", dispatched)
+    monkeypatch.setattr("rosman.exec_env.login_env", lambda *args: None)
 
     assert try_fast_passthrough(["topic", "list"]) == 42
     dispatched.assert_called_once()
@@ -73,12 +75,13 @@ def test_stopped_matching_container_starts_then_dispatches(tmp_path: Path, monke
     monkeypatch.setattr("rosman.fast_dispatch.resolve_config", lambda: config)
     monkeypatch.setattr("rosman.fast_dispatch.shutil.which", lambda name: "/usr/bin/docker")
     monkeypatch.setattr(
-        "rosman.fast_dispatch._inspect", lambda docker, name: (False, matching_labels(config))
+        "rosman.fast_dispatch._inspect", lambda docker, name: ("id", False, matching_labels(config))
     )
     monkeypatch.setattr("rosman.fast_dispatch._start", lambda docker, name: True)
     monkeypatch.setattr("rosman.fast_dispatch._maybe_update", lambda state: None)
     dispatched = MagicMock(return_value=42)
     monkeypatch.setattr("rosman.fast_dispatch.dispatch_passthrough", dispatched)
+    monkeypatch.setattr("rosman.exec_env.login_env", lambda *args: None)
     assert try_fast_passthrough(["topic", "list"]) == 42
 
 
@@ -87,7 +90,7 @@ def test_stopped_container_start_failure_falls_back(tmp_path: Path, monkeypatch)
     monkeypatch.setattr("rosman.fast_dispatch.resolve_config", lambda: config)
     monkeypatch.setattr("rosman.fast_dispatch.shutil.which", lambda name: "/usr/bin/docker")
     monkeypatch.setattr(
-        "rosman.fast_dispatch._inspect", lambda docker, name: (False, matching_labels(config))
+        "rosman.fast_dispatch._inspect", lambda docker, name: ("id", False, matching_labels(config))
     )
     monkeypatch.setattr("rosman.fast_dispatch._start", lambda docker, name: False)
     assert try_fast_passthrough(["topic", "list"]) is None
@@ -99,7 +102,7 @@ def test_drifted_container_falls_back_to_full_lifecycle(tmp_path: Path, monkeypa
     labels[CONFIG_HASH_LABEL] = "stale"
     monkeypatch.setattr("rosman.fast_dispatch.resolve_config", lambda: config)
     monkeypatch.setattr("rosman.fast_dispatch.shutil.which", lambda name: "/usr/bin/docker")
-    monkeypatch.setattr("rosman.fast_dispatch._inspect", lambda docker, name: (True, labels))
+    monkeypatch.setattr("rosman.fast_dispatch._inspect", lambda docker, name: ("id", True, labels))
     assert try_fast_passthrough(["topic", "list"]) is None
 
 
@@ -126,5 +129,26 @@ def test_removed_remote_peers_fall_back_for_peer_file_refresh(tmp_path: Path, mo
     labels[REMOTE_PEERS_LABEL] = '["192.0.2.10"]'
     monkeypatch.setattr("rosman.fast_dispatch.resolve_config", lambda: config)
     monkeypatch.setattr("rosman.fast_dispatch.shutil.which", lambda name: "/usr/bin/docker")
-    monkeypatch.setattr("rosman.fast_dispatch._inspect", lambda docker, name: (True, labels))
+    monkeypatch.setattr("rosman.fast_dispatch._inspect", lambda docker, name: ("id", True, labels))
     assert try_fast_passthrough(["topic", "list"]) is None
+
+
+def test_inspect_socket_falls_back_when_daemon_unreachable(monkeypatch):
+    from rosman import fast_dispatch
+
+    monkeypatch.setenv("DOCKER_HOST", "unix:///nonexistent/docker.sock")
+    assert fast_dispatch._inspect_socket("container") is None
+    monkeypatch.setenv("DOCKER_HOST", "tcp://127.0.0.1:2375")
+    assert fast_dispatch._inspect_socket("container") is None
+
+
+def test_inspect_socket_matches_cli_on_real_daemon():
+    import shutil
+
+    from rosman import fast_dispatch
+
+    docker = shutil.which("docker")
+    if docker is None or fast_dispatch._inspect_socket("definitely-no-such-container") is not None:
+        return
+    # A missing container must yield None on both paths.
+    assert fast_dispatch._inspect_cli(docker, "definitely-no-such-container") is None

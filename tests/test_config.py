@@ -502,3 +502,34 @@ def test_gpu_fallback_changes_config_hash(tmp_path: Path, monkeypatch):
     with_gpu = _gpu_config(tmp_path, monkeypatch, True, body)
     without = _gpu_config(tmp_path, monkeypatch, False, body)
     assert compute_config_hash(with_gpu) != compute_config_hash(without)
+
+
+def test_config_cache_skips_yaml_and_invalidates_on_edit(tmp_path: Path, monkeypatch):
+    from rosman import config as config_module
+
+    path = tmp_path / "rosman.yml"
+    path.write_text("ros_distro: humble\nextra_apt_packages: [git]\n")
+    first = config_module.load_config(path)
+    assert first.extra_apt_packages == ["git"]
+
+    def boom(*args, **kwargs):
+        raise AssertionError("yaml parsed despite a warm cache")
+
+    monkeypatch.setattr(config_module, "_parse_sources", boom)
+    assert config_module.load_config(path).extra_apt_packages == ["git"]
+
+    monkeypatch.undo()
+    path.write_text("ros_distro: humble\nextra_apt_packages: [git, vim]\n")
+    assert config_module.load_config(path).extra_apt_packages == ["git", "vim"]
+
+
+def test_config_cache_tracks_lock_and_local_override(tmp_path: Path):
+    from rosman import config as config_module
+
+    path = tmp_path / "rosman.yml"
+    path.write_text("ros_distro: humble\n")
+    assert config_module.load_config(path).devices == []
+    (tmp_path / "rosman.local.yml").write_text('devices: ["/dev/ttyUSB1"]\n')
+    assert config_module.load_config(path).devices == ["/dev/ttyUSB1"]
+    config_module.write_lock(path, "humble", ["libfoo"], [])
+    assert config_module.load_config(path).locked_apt_packages == ["libfoo"]

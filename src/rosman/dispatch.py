@@ -63,7 +63,9 @@ def _docker_binary() -> str:
     return binary
 
 
-def _exec_argv(container: str, workdir: str, command: list[str]) -> list[str]:
+def _exec_argv(
+    container: str, workdir: str, command: list[str], env: dict[str, str] | None = None
+) -> list[str]:
     # -i (keep stdin open) is safe and correct even when stdin isn't a TTY --
     # e.g. `some_script | rosman shell` piping commands in -- and dropping it
     # in that case silently produces a `docker exec` with no stdin attached
@@ -74,11 +76,15 @@ def _exec_argv(container: str, workdir: str, command: list[str]) -> list[str]:
     if sys.stdin.isatty() and sys.stdout.isatty():
         flags += "t"
     argv = [_docker_binary(), "exec", flags]
+    for key, value in (env or {}).items():
+        argv += ["-e", f"{key}={value}"]
     argv += ["-w", workdir, container, *command]
     return argv
 
 
-def exec_in_container(container_name: str, workdir: str, command: list[str]) -> int:
+def exec_in_container(
+    container_name: str, workdir: str, command: list[str], env: dict[str, str] | None = None
+) -> int:
     """Replace the current process with `docker exec` into the container,
     running `command` at `workdir`. Never returns on POSIX (os.execvp
     replaces the process image); returns the exit code on Windows, where
@@ -91,7 +97,7 @@ def exec_in_container(container_name: str, workdir: str, command: list[str]) -> 
     that the child sees a corrupted argv and `docker exec` fails with
     "unknown shorthand flag". `subprocess.call` quotes correctly there via
     `subprocess.list2cmdline`, so Windows always goes through that branch."""
-    argv = _exec_argv(container_name, workdir, command)
+    argv = _exec_argv(container_name, workdir, command, env)
     if os.name == "posix":
         os.execvp(argv[0], argv)  # noqa: S606 - intentional, see module docstring
     import subprocess
@@ -99,7 +105,12 @@ def exec_in_container(container_name: str, workdir: str, command: list[str]) -> 
     return subprocess.call(argv)
 
 
-def dispatch_passthrough(args: list[str], container_name: str, workdir: str) -> int:
+def dispatch_passthrough(
+    args: list[str],
+    container_name: str,
+    workdir: str,
+    login_env: dict[str, str] | None = None,
+) -> int:
     """Forward a non-reserved `rosman <args>` call into the container.
 
     `rosman colcon build`  -> `docker exec ... colcon build`
@@ -117,6 +128,10 @@ def dispatch_passthrough(args: list[str], container_name: str, workdir: str) -> 
     `/etc/profile.d/rosman-ros.sh`, which only login shells read. A plain
     `docker exec container ros2 ...` gets a fresh, un-sourced environment
     and fails with "ros2: executable file not found in $PATH".
+
+    When the caller already knows what that login shell would produce
+    (`login_env`, see exec_env.py), the tool is exec'd directly with that
+    environment instead, skipping the login shell's startup cost.
     """
     if not args:
         raise RosmanError("No command given. Run `rosman --help` for usage.")
@@ -124,6 +139,8 @@ def dispatch_passthrough(args: list[str], container_name: str, workdir: str) -> 
         command = list(args)
     else:
         command = ["ros2", *args]
+    if login_env:
+        return exec_in_container(container_name, workdir, command, login_env)
     return exec_in_container(container_name, workdir, ["bash", "-lc", shlex.join(command)])
 
 
