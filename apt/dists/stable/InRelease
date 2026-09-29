@@ -8,29 +8,29 @@ Codename: stable
 Architectures: amd64
 Components: main
 Description: rosman package repository (https://github.com/alec-jensen/rosman)
-Date: Tue, 29 Sep 2026 23:09:02 UTC
+Date: Tue, 29 Sep 2026 23:46:02 UTC
 MD5Sum:
- abac996438428c7df6ac76cea709735d 10166 main/binary-amd64/Packages
- c880a5b7e81299a48d39b2bfecf5a0d8 2167 main/binary-amd64/Packages.gz
+ 5a52fa87babbe45b68ade173a4c453d2 10764 main/binary-amd64/Packages
+ bd0ba7a2793eda528ca4c3e481a4dd70 2278 main/binary-amd64/Packages.gz
 SHA1:
- 27cf33617d1ee4322882c2b92360157875f92992 10166 main/binary-amd64/Packages
- 2fe160711dee349d9115a332dfeb5e0ecdf1b6da 2167 main/binary-amd64/Packages.gz
+ cae9ddea8f7c2ad9a83866e5f835924fadd183eb 10764 main/binary-amd64/Packages
+ 13bb493f5d3d0a72bb7bf499a567401133ccc8f1 2278 main/binary-amd64/Packages.gz
 SHA256:
- 33562424b9a4a0a43c795f65b8bdce88bce1a1384559f12c152250065ac9659a 10166 main/binary-amd64/Packages
- bc716e316fc9d6e127f86216ef5966c1679708d6c0483e021b4e661c5eb74dd7 2167 main/binary-amd64/Packages.gz
+ d50a6d26855d0f5c967db6785190e220e64d6bfca0389e5bedb0138b2ca1da95 10764 main/binary-amd64/Packages
+ 094b451a22b1ad031806bb80e7f1655595405c4f1693603efc9425f5233151b0 2278 main/binary-amd64/Packages.gz
 -----BEGIN PGP SIGNATURE-----
 
-iQIzBAEBCgAdFiEECXP45zRCky8iKstYzZLoFLZyDaMFAmq8RQ4ACgkQzZLoFLZy
-DaPM3BAAg+P1LhfH3cq6R19/9ALRPNv6tu84Q2T1ElMPEDCitZ8liPFrk0RggBrx
-bcj+yPAwbIJWKNMcmkxAUpcA+TGzfMlkvM4P+Ay3h+80cUbmbvVxwEhM4TtjZgiR
-P7LOfP1WYpLDPDxKMVcpp/oQ5/SPjFQDRPJiiZTWxPu+V2kV4UvnHe8Cua9q248I
-x1ImISHmXOF5kuAAhI66j9ITa5YVWpER95ACWAXD3xqFQC7l28o5RvnXrrSocdR5
-5k9jBvSuVzOcZTAWmtKXmlbAv4VRAVJ8d6mXRRtzE9Zqggdaca4RB+flwBUYn32S
-HfRcwdVFupGNE5kpi/MsA2STt6xG6IRWR+cei2lov9XWmQO3Uo8iISc83CK07Arp
-3PZPle+26EvNgsEpHnbJ5zANG9UuI+BQuLS3g1HaiBqsxlpAaieFAyTdYPi1vUhi
-0JofSGvR7l618HT6l8oxsXryqdpbdGLUn1wOd8QKd/vennXZMI3fl15EepTisbdI
-XFiwRgIT+f7l3JCBpzzMaiAboSYDEHYTpRwauW/5DtUeIxM5g1j94LKLNDw9mgVl
-wKA0xk39/DbTjMmFhQSHM5n4SKO9BPNjJntsK9+8WQKbiHlQO1SqNLBPwHL6oVzy
-TCgbUA0N9OEwyJkh6EPoqOjoyUb7SVDjgnSv2+4R5OW/gDCHkBk=
-=BM7l
+iQIzBAEBCgAdFiEECXP45zRCky8iKstYzZLoFLZyDaMFAmq8TboACgkQzZLoFLZy
+DaMJjQ//dJ4nfmr2O9rf6UiwJtk4FCF+HmwFPR0RB6dP9JUOtDyDFelEzIrwVdBQ
+L/2tQP7T4/69y+Yfy6P3663IOnVIxkiKXkwNnf2UIlllJc+VUiPTIWZ1nMd6cjFE
+/jfdZOv1AQ8YiEvIphJ1pXDVFt0SaKN+vphMfhaw1HAeS+n+quUbhMgShwVB8m1G
+F218behXyMtoMBrpuF3B9QEUNT+qSre8b1Ygey780hzMQDjOxXmXRrMVWaJHPvfk
+cWONytgvY1IRYHyHMkjW1mC4jMvxaWDydTTWM3BbK9AbzMCFBjwS7npYtyQVXK42
+d9/nZ4ukqKu0ou8ZBzrAE+a5oa3TH2Q4EX1XtpE/qvO+Ak2CfhELmRD5cIjvRYsi
+7PgOwMM3V56ADOyy5e2XF1L4NghR+jcGJeKO98Ngf3M0J+270WRuZDw8iyiYSgoP
+CSWMCVkJF29J7OHbSJv++/PBYhGq0oeGFgAz+sJpT4q+ownAP6+M3YD97ej+JtEh
+6iJXm10BCjch/p4hGPqbouQL+CP9trb5P09rlT74pLvSodGaPGx3EnsDC1zJj7FC
+xRFOpuJ6XgGrcXXD3QGtWHJxOgBwlNREI3FytXiiG54LpknftJWBG4ZwXp5JcWx7
+ZqqUiRZLoI9hqQJOZLkAxPMh+So0FKLAUHhfyXVlgXqWRyP1bRc=
+=XWa6
 -----END PGP SIGNATURE-----
