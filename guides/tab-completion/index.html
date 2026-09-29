@@ -818,11 +818,20 @@ standard lookup paths. Restart the shell after installing or upgrading;
 there is no shell-rc line to add. If you configured an older release with
 <code>eval "$(rosman completion ...)"</code>, remove that line — leaving it is harmless,
 but starts an unnecessary process on every new shell.</p>
-<p>For source or wheel installs, register completion manually:</p>
-<div class="highlight"><pre><span></span><code><span class="nb">echo</span><span class="w"> </span><span class="s1">'eval "$(rosman completion bash)"'</span><span class="w"> </span>&gt;&gt;<span class="w"> </span>~/.bashrc
-<span class="c1"># or, for zsh:</span>
-<span class="nb">echo</span><span class="w"> </span><span class="s1">'eval "$(rosman completion zsh)"'</span><span class="w"> </span>&gt;&gt;<span class="w"> </span>~/.zshrc
+<p>For source or wheel installs (<code>pip</code>, <code>uv tool</code>), the wheel ships the same
+files under <code>&lt;prefix&gt;/share</code>. Symlink them once instead of starting a process
+on every shell:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># bash (bash-completion loads this directory automatically)</span>
+mkdir<span class="w"> </span>-p<span class="w"> </span>~/.local/share/bash-completion/completions
+ln<span class="w"> </span>-sf<span class="w"> </span><span class="s2">"</span><span class="k">$(</span>python<span class="w"> </span>-c<span class="w"> </span><span class="s1">'import sys; print(sys.prefix)'</span><span class="k">)</span><span class="s2">/share/bash-completion/completions/rosman"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>~/.local/share/bash-completion/completions/rosman
+
+<span class="c1"># zsh (~/.zfunc must be on fpath before compinit runs)</span>
+mkdir<span class="w"> </span>-p<span class="w"> </span>~/.zfunc
+ln<span class="w"> </span>-sf<span class="w"> </span><span class="s2">"</span><span class="k">$(</span>python<span class="w"> </span>-c<span class="w"> </span><span class="s1">'import sys; print(sys.prefix)'</span><span class="k">)</span><span class="s2">/share/zsh/site-functions/_rosman"</span><span class="w"> </span>~/.zfunc/_rosman
 </code></pre></div>
+<p>Run those with the Python environment rosman is installed in. If you'd rather
+not manage files, <code>eval "$(rosman completion bash)"</code> (or <code>zsh</code>) still works.</p>
 <p>Restart your shell (or <code>source ~/.bashrc</code>/<code>~/.zshrc</code>), then tab-complete
 <code>rosman</code> calls exactly as if you were running <code>ros2</code>/<code>colcon</code> natively:</p>
 <div class="highlight"><pre><span></span><code>$<span class="w"> </span>rosman<span class="w"> </span>topic<span class="w"> </span>ec&lt;TAB&gt;
