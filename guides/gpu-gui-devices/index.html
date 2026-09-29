@@ -633,6 +633,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="GPU">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#teams-where-not-everyone-has-an-nvidia-gpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Teams where not everyone has an NVIDIA GPU
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -790,6 +807,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="GPU">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#teams-where-not-everyone-has-an-nvidia-gpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Teams where not everyone has an NVIDIA GPU
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -845,6 +879,23 @@ means WSL2 GPU paravirtualization plus <code>nvidia-container-toolkit</code> ins
 WSL2, which then works the same way as native Linux from Docker's
 perspective. rosman requests the passthrough; it doesn't independently
 verify it works (<code>rosman doctor</code> notes this).</p>
+<h3 id="teams-where-not-everyone-has-an-nvidia-gpu">Teams where not everyone has an NVIDIA GPU<a class="headerlink" href="#teams-where-not-everyone-has-an-nvidia-gpu" title="Permanent link">&para;</a></h3>
+<p>Use <code>gpu: auto</code> and put the non-GPU differences under <code>no_gpu:</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">gpu</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
+<span class="nt">base_image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nvidia/cuda:12.4.1-devel-ubuntu22.04</span><span class="w">   </span><span class="c1"># for people with a GPU</span>
+<span class="nt">setup_script</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">scripts/install-zed.sh</span>
+<span class="nt">no_gpu</span><span class="p">:</span><span class="w">                        </span><span class="c1"># applied only when no NVIDIA GPU is found</span>
+<span class="w">  </span><span class="nt">base_image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span><span class="w">             </span><span class="c1"># plain ros:&lt;distro&gt;</span>
+<span class="w">  </span><span class="nt">setup_script</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span>
+</code></pre></div>
+<p>rosman checks for an NVIDIA GPU on every command (a few file stats, no
+subprocess). With one, <code>gpu</code> is on and <code>no_gpu</code> is ignored; without one, <code>gpu</code>
+is off and every field under <code>no_gpu</code> replaces the shared value. The two setups
+build different images (the image hash changes with <code>base_image</code>/<code>setup_script</code>),
+so both work with <code>registry_image</code> team sharing. <code>rosman status</code> and
+<code>rosman doctor</code> say when the fallback is active. <code>gpu: true</code> still means
+"require it" and never falls back. Set <code>ROSMAN_GPU=0</code> or <code>1</code> to override
+detection. <code>no_gpu</code> may override any field except <code>ros_distro</code> and <code>gpu</code>.</p>
 <h2 id="gui-apps-rviz2-rqt-gazebo">GUI apps (rviz2, rqt, Gazebo, ...)<a class="headerlink" href="#gui-apps-rviz2-rqt-gazebo" title="Permanent link">&para;</a></h2>
 <p>rosman wires up the GUI <em>plumbing</em> automatically — X11 socket/XAuth on
 Linux, WSLg on Windows — but doesn't install GUI packages itself. Add them
