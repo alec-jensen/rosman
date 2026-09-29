@@ -59,7 +59,12 @@ _DEFAULTS: dict[str, Any] = {
     "registry_image": None,
     "remote_peers": [],
     "ports": [],
+    "no_gpu": None,
 }
+
+# Fields that can't be swapped by a `no_gpu:` fallback block: the distro is
+# what rosman.lock was generated for, and `gpu`/`no_gpu` are what's being decided.
+_NO_GPU_FORBIDDEN = {"ros_distro", "gpu", "no_gpu"}
 
 
 @dataclass
@@ -81,6 +86,10 @@ class RosmanConfig:
     registry_image: str | None = None
     remote_peers: list[str] = field(default_factory=list)
     ports: list[str] = field(default_factory=list)
+
+    # Not part of the YAML schema — set when `gpu: auto` found no NVIDIA GPU
+    # and the `no_gpu:` overrides (if any) were applied.
+    gpu_fallback: bool = False
 
     # Not part of the YAML schema — filled in by the loader from
     # rosman.lock (see lock_path/read_lock), never written in rosman.yml
@@ -262,6 +271,36 @@ def parse_config(text: str, path: Path) -> RosmanConfig:
     return _build_config(data, path)
 
 
+def _resolve_gpu(data: dict[str, Any], path: Path) -> tuple[dict[str, Any], bool]:
+    """Resolve `gpu: auto` and the `no_gpu:` fallback block.
+
+    `gpu: auto` means "use the NVIDIA GPU if this host has one". When it
+    doesn't, `gpu` becomes false and every field in `no_gpu:` (e.g. a plain
+    `base_image` instead of an nvidia/cuda one) replaces the shared value, so
+    one checked-in rosman.yml serves teammates with and without a GPU. With
+    `gpu: true` the GPU is required and `no_gpu:` is never applied.
+    """
+    fallback = data.get("no_gpu")
+    if fallback is not None:
+        if not isinstance(fallback, dict):
+            raise ConfigError(f"{path}: 'no_gpu' must be a mapping of fields to override.")
+        bad = sorted(set(fallback) & _NO_GPU_FORBIDDEN)
+        if bad:
+            raise ConfigError(f"{path}: 'no_gpu' cannot override: {', '.join(bad)}.")
+    unknown = set(fallback or {}) - set(_DEFAULTS)
+    if unknown:
+        raise ConfigError(
+            f"{path}: 'no_gpu' has unrecognized field(s): {', '.join(sorted(unknown))}."
+        )
+    if data.get("gpu", _DEFAULTS["gpu"]) != "auto":
+        return data, False
+    from rosman.platform_support import host_has_nvidia_gpu
+
+    if host_has_nvidia_gpu():
+        return {**data, "gpu": True}, False
+    return {**data, **(fallback or {}), "gpu": False}, True
+
+
 def _build_config(data: dict[str, Any], path: Path) -> RosmanConfig:
     """Validate an already-loaded (and, for a local override, already-merged)
     mapping and build the effective RosmanConfig. `path` is used only for
@@ -269,6 +308,8 @@ def _build_config(data: dict[str, Any], path: Path) -> RosmanConfig:
     `workspace_root`/`project_root` resolve relative to) -- when a local
     override was merged in, this is still the *main* rosman.yml's path, not
     the override's, so those stay anchored to the checked-in project root."""
+    data, gpu_fallback = _resolve_gpu(data, path)
+
     missing = [f for f in REQUIRED_FIELDS if f not in data]
     if missing:
         raise ConfigError(
@@ -314,7 +355,7 @@ def _build_config(data: dict[str, Any], path: Path) -> RosmanConfig:
 
     gpu = data.get("gpu", _DEFAULTS["gpu"])
     if not isinstance(gpu, bool):
-        raise ConfigError(f"{path}: 'gpu' must be true or false.")
+        raise ConfigError(f"{path}: 'gpu' must be true, false, or auto.")
 
     restart_policy = data.get("restart_policy", _DEFAULTS["restart_policy"])
     if restart_policy not in RESTART_POLICIES:
@@ -335,7 +376,7 @@ def _build_config(data: dict[str, Any], path: Path) -> RosmanConfig:
             "would silently break discovery instead of just failing loudly here."
         )
 
-    return RosmanConfig(
+    config = RosmanConfig(
         ros_distro=ros_distro,
         rmw_implementation=rmw,
         domain_id=domain_id,
@@ -361,6 +402,8 @@ def _build_config(data: dict[str, Any], path: Path) -> RosmanConfig:
         ports=_validate_ports(data.get("ports", list(_DEFAULTS["ports"])), path),
         config_path=path,
     )
+    config.gpu_fallback = gpu_fallback
+    return config
 
 
 def local_override_path(config_path: Path) -> Path:

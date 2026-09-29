@@ -113,7 +113,16 @@ def run_checks(
         else:
             checks.append(Check("config drift", True, "container matches rosman.yml"))
 
-    if config.gpu:
+    if config.gpu_fallback:
+        checks.append(
+            Check(
+                "gpu",
+                True,
+                "gpu: auto — no NVIDIA GPU found on this host, using CPU"
+                " (and the no_gpu overrides, if any)",
+            )
+        )
+    elif config.gpu:
         checks.append(
             Check(
                 "gpu",

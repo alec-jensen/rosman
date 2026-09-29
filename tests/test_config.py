@@ -443,3 +443,62 @@ def test_malformed_lock_apt_packages_is_a_config_error(tmp_path: Path):
 
     with pytest.raises(ConfigError, match="apt_packages"):
         load_config(path)
+
+
+def _gpu_config(tmp_path: Path, monkeypatch, has_gpu: bool, body: str = ""):
+    monkeypatch.setenv("ROSMAN_GPU", "1" if has_gpu else "0")
+    return parse_config(
+        "ros_distro: humble\ngpu: auto\nbase_image: nvidia/cuda:12.4.1-devel-ubuntu22.04\n"
+        + body,
+        tmp_path / "rosman.yml",
+    )
+
+
+def test_gpu_auto_with_gpu_keeps_shared_settings(tmp_path: Path, monkeypatch):
+    config = _gpu_config(tmp_path, monkeypatch, True, "no_gpu:\n  base_image: null\n")
+    assert config.gpu is True
+    assert config.gpu_fallback is False
+    assert config.base_image == "nvidia/cuda:12.4.1-devel-ubuntu22.04"
+
+
+def test_gpu_auto_without_gpu_applies_no_gpu_overrides(tmp_path: Path, monkeypatch):
+    config = _gpu_config(
+        tmp_path, monkeypatch, False, "no_gpu:\n  base_image: null\n  extra_apt_packages: [git]\n"
+    )
+    assert config.gpu is False
+    assert config.gpu_fallback is True
+    assert config.base_image is None
+    assert config.extra_apt_packages == ["git"]
+
+
+def test_gpu_auto_without_gpu_and_no_block_just_disables_gpu(tmp_path: Path, monkeypatch):
+    config = _gpu_config(tmp_path, monkeypatch, False)
+    assert config.gpu is False
+    assert config.base_image == "nvidia/cuda:12.4.1-devel-ubuntu22.04"
+
+
+def test_gpu_true_never_applies_no_gpu(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("ROSMAN_GPU", "0")
+    config = parse_config(
+        "ros_distro: humble\ngpu: true\nbase_image: x\nno_gpu:\n  base_image: null\n",
+        tmp_path / "rosman.yml",
+    )
+    assert config.gpu is True
+    assert config.base_image == "x"
+
+
+def test_no_gpu_rejects_forbidden_and_unknown_fields(tmp_path: Path):
+    for body in ("ros_distro: jazzy", "gpu: true", "bogus: 1"):
+        with pytest.raises(ConfigError):
+            parse_config(
+                f"ros_distro: humble\nno_gpu:\n  {body}\n", tmp_path / "rosman.yml"
+            )
+
+
+def test_gpu_fallback_changes_config_hash(tmp_path: Path, monkeypatch):
+    from rosman.runtime_config import compute_config_hash
+
+    body = "no_gpu:\n  base_image: null\n"
+    with_gpu = _gpu_config(tmp_path, monkeypatch, True, body)
+    without = _gpu_config(tmp_path, monkeypatch, False, body)
+    assert compute_config_hash(with_gpu) != compute_config_hash(without)

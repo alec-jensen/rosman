@@ -14,6 +14,28 @@ WSL2, which then works the same way as native Linux from Docker's
 perspective. rosman requests the passthrough; it doesn't independently
 verify it works (`rosman doctor` notes this).
 
+### Teams where not everyone has an NVIDIA GPU
+
+Use `gpu: auto` and put the non-GPU differences under `no_gpu:`:
+
+```yaml
+gpu: auto
+base_image: nvidia/cuda:12.4.1-devel-ubuntu22.04   # for people with a GPU
+setup_script: scripts/install-zed.sh
+no_gpu:                        # applied only when no NVIDIA GPU is found
+  base_image: null             # plain ros:<distro>
+  setup_script: null
+```
+
+rosman checks for an NVIDIA GPU on every command (a few file stats, no
+subprocess). With one, `gpu` is on and `no_gpu` is ignored; without one, `gpu`
+is off and every field under `no_gpu` replaces the shared value. The two setups
+build different images (the image hash changes with `base_image`/`setup_script`),
+so both work with `registry_image` team sharing. `rosman status` and
+`rosman doctor` say when the fallback is active. `gpu: true` still means
+"require it" and never falls back. Set `ROSMAN_GPU=0` or `1` to override
+detection. `no_gpu` may override any field except `ros_distro` and `gpu`.
+
 ## GUI apps (rviz2, rqt, Gazebo, ...)
 
 rosman wires up the GUI *plumbing* automatically — X11 socket/XAuth on

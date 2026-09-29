@@ -43,7 +43,7 @@ ros_distro: {distro}          # required -- any distro with an official ros:<tag
 rmw_implementation: cyclonedds  # default; cyclonedds is the only supported path today
 domain_id: auto               # "auto" assigns + persists one per project; or an explicit int
 network: default               # Docker network group; shared projects can discover each other
-gpu: false                    # true enables nvidia-container-toolkit passthrough
+gpu: false                    # true = require an NVIDIA GPU; auto = use one if present (see no_gpu)
 devices: []                   # e.g. ["/dev/ttyUSB0"]
 workspace_dir: .              # path (relative to this file) mounted as the container workspace root
 extra_apt_packages: []        # optional list, installed into the image on first build
@@ -250,7 +250,10 @@ def cmd_config(args: argparse.Namespace) -> int:
     table.add_row("network_mode", network_mode_display)
     if network_mode != "host":
         table.add_row("network group", config.network)
-    table.add_row("gpu", str(config.gpu))
+    gpu_display = "False (no NVIDIA GPU found; using no_gpu overrides)" if (
+        config.gpu_fallback
+    ) else str(config.gpu)
+    table.add_row("gpu", gpu_display)
     if config.devices:
         table.add_row("devices", ", ".join(config.devices))
     table.add_row("workspace_root", str(config.workspace_root))

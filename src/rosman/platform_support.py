@@ -30,6 +30,24 @@ def is_wsl2() -> bool:
         return False
 
 
+def host_has_nvidia_gpu() -> bool:
+    """Cheap, subprocess-free check for a usable NVIDIA GPU on the host.
+
+    Runs on every rosman command (config resolution), so it only stats a few
+    well-known paths: the driver's control node on Linux, the CUDA shim WSL2
+    exposes, or `nvidia-smi` on native Windows. `ROSMAN_GPU=0/1` overrides it
+    (for testing, or a machine where detection guesses wrong).
+    """
+    forced = os.environ.get("ROSMAN_GPU")
+    if forced in ("0", "1"):
+        return forced == "1"
+    if os.name == "nt":
+        import shutil
+
+        return shutil.which("nvidia-smi") is not None
+    return os.path.exists("/dev/nvidiactl") or os.path.exists("/usr/lib/wsl/lib/libcuda.so.1")
+
+
 @dataclass
 class GuiPassthrough:
     environment: dict[str, str] = field(default_factory=dict)
