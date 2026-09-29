@@ -6,13 +6,23 @@ there is no shell-rc line to add. If you configured an older release with
 `eval "$(rosman completion ...)"`, remove that line — leaving it is harmless,
 but starts an unnecessary process on every new shell.
 
-For source or wheel installs, register completion manually:
+For source or wheel installs (`pip`, `uv tool`), the wheel ships the same
+files under `<prefix>/share`. Symlink them once instead of starting a process
+on every shell:
 
 ```sh
-echo 'eval "$(rosman completion bash)"' >> ~/.bashrc
-# or, for zsh:
-echo 'eval "$(rosman completion zsh)"' >> ~/.zshrc
+# bash (bash-completion loads this directory automatically)
+mkdir -p ~/.local/share/bash-completion/completions
+ln -sf "$(python -c 'import sys; print(sys.prefix)')/share/bash-completion/completions/rosman" \
+    ~/.local/share/bash-completion/completions/rosman
+
+# zsh (~/.zfunc must be on fpath before compinit runs)
+mkdir -p ~/.zfunc
+ln -sf "$(python -c 'import sys; print(sys.prefix)')/share/zsh/site-functions/_rosman" ~/.zfunc/_rosman
 ```
+
+Run those with the Python environment rosman is installed in. If you'd rather
+not manage files, `eval "$(rosman completion bash)"` (or `zsh`) still works.
 
 Restart your shell (or `source ~/.bashrc`/`~/.zshrc`), then tab-complete
 `rosman` calls exactly as if you were running `ros2`/`colcon` natively:

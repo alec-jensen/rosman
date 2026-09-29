@@ -1,0 +1,16 @@
+#compdef rosman
+local cur=${words[CURRENT]}
+    local -a candidates dynamic args
+    args=("${words[@]:1}")
+
+    dynamic=("${(@f)$(rosman __complete "${args[@]}" 2>/dev/null)}")
+    if (( CURRENT == 2 )); then
+        candidates=(init up down status config prune rebuild doctor shell push completion help colcon rosdep "${dynamic[@]}")
+    else
+        candidates=("${dynamic[@]}")
+    fi
+
+    # Preserve order while removing the one collision currently possible
+    # at the first word (`doctor` is both rosman's command and ros2's).
+    typeset -U candidates
+    compadd -- "${candidates[@]}"

@@ -35,6 +35,13 @@ Issues = "https://github.com/alec-jensen/rosman/issues"
 [tool.hatch.build.targets.wheel]
 packages = ["src/rosman"]
 
+# Installed under <prefix>/share, where bash-completion (and zsh, if the dir
+# is on fpath) find them without any rc-file line. Regenerate with
+# `python packaging/generate-completions.py completions`.
+[tool.hatch.build.targets.wheel.shared-data]
+"completions/rosman.bash" = "share/bash-completion/completions/rosman"
+"completions/_rosman" = "share/zsh/site-functions/_rosman"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",

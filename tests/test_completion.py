@@ -188,3 +188,11 @@ def test_packaged_zsh_completion_has_no_syntax_errors(tmp_path: Path):
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_shipped_completion_files_match_source():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent / "completions"
+    assert (root / "rosman.bash").read_text() == BASH_SCRIPT
+    assert (root / "_rosman").read_text() == PACKAGED_ZSH_SCRIPT
