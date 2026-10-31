@@ -310,10 +310,10 @@ Architecture: amd64
 Maintainer: Alec Jensen
 Installed-Size: 22958
 Filename: pool/main/r/rosman/rosman_0.5.1_amd64.deb
-Size: 11266382
-MD5sum: 17995e02a2df57a4934e4e50792b7875
-SHA1: 521f54f05c8c7f01896716ed8c0bcc3ba04f3581
-SHA256: 953cfd0e77ba1b81f01be9049a3a0b1d0bda18ef9a2f89e8b7544adb197453dd
+Size: 11267018
+MD5sum: 991f823f05f348ebde0d61f747adba2b
+SHA1: fa3a93e71701226ddcc77b03e1af54024620797f
+SHA256: 4c07d97d58dfb8d9fe0bc2097182facdbdfd8ce154946d1eb20c8228639fe256
 Section: utils
 Priority: optional
 Homepage: https://github.com/alec-jensen/rosman
