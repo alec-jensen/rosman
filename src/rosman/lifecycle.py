@@ -84,6 +84,26 @@ IMAGE_GID = 1000
 # rather than assuming every base image already has them).
 DEVICE_GROUPS = ["dialout", "video", "audio", "plugdev", "disk", "tty", "uucp"]
 
+def _device_group_add(devices: list[str]) -> list[str | int]:
+    """DEVICE_GROUPS by name, plus the numeric gid owning each device node.
+
+    Names resolve against the *image's* /etc/group, whose gids rarely match
+    the host's (host `video` is often 39 on Fedora, 44 on Ubuntu), so a
+    `root:video 0660` node on the host can still be unopenable in the
+    container. The node's own gid is the one that actually gates access.
+    gid 0 is skipped (directories like /dev/bus/usb are root-owned and
+    world-readable; adding root's group would be needless privilege)."""
+    groups: list[str | int] = list(DEVICE_GROUPS)
+    for device in devices:
+        try:
+            gid = os.stat(device).st_gid
+        except OSError:
+            continue
+        if gid != 0 and gid not in groups:
+            groups.append(gid)
+    return groups
+
+
 # Ubuntu codename ROS 2 apt packages are published under for each distro, used
 # only when `base_image` overrides the default `ros:<distro>` image and rosman
 # has to apt-install ROS 2 onto an arbitrary base itself (spec extension:
@@ -701,7 +721,7 @@ class ContainerManager:
         # still block the container's non-root user without this. See
         # DEVICE_GROUPS' docstring -- these are guaranteed to exist in the
         # image regardless of base_image, so this is safe unconditionally.
-        group_add = DEVICE_GROUPS if config.devices else None
+        group_add = _device_group_add(config.devices) if config.devices else None
         device_requests = None
         if config.gpu:
             device_requests = [DeviceRequest(count=-1, capabilities=[["gpu"]])]

@@ -5,6 +5,17 @@ See [GitHub Releases](https://github.com/alec-jensen/rosman/releases) for
 downloadable artifacts, and [docs/roadmap.md](docs/roadmap.md) for the
 full build/verification history behind each entry.
 
+## v0.5.2 — 2026-10-31
+
+### Fixed
+
+- Devices listed under `devices:` are now openable when the host's group ids
+  differ from the image's. Previously only group *names* (`video`, `dialout`,
+  ...) were added, and those resolve to the image's gids (e.g. `video` is 44
+  in Ubuntu images but 39 on Fedora), so a `root:video 0660` camera or serial
+  node could still be denied. The numeric gid owning each device node is now
+  added too.
+
 ## v0.5.1 — 2026-10-30
 
 ### Fixed

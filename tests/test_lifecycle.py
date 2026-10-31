@@ -802,3 +802,14 @@ def test_remove_images_sums_across_multiple_images():
 
     assert count == 2
     assert reclaimed == 350
+
+
+def test_device_group_add_includes_numeric_gid_of_device_node(tmp_path: Path):
+    from rosman.lifecycle import _device_group_add
+
+    node = tmp_path / "video0"
+    node.write_text("")
+    gid = node.stat().st_gid
+    groups = _device_group_add([str(node), str(tmp_path / "missing")])
+    assert groups[: len(DEVICE_GROUPS)] == DEVICE_GROUPS
+    assert (gid in groups) == (gid != 0)
