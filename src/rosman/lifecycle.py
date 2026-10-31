@@ -300,6 +300,14 @@ RUN (getent group {IMAGE_GID} || groupadd --gid {IMAGE_GID} {DEFAULT_USERNAME}) 
 RUN chmod 0777 /home/{DEFAULT_USERNAME} \\
     && chmod 0666 /etc/passwd
 
+# Same arbitrary-runtime-UID reasoning applies to the base image's own
+# pip-installed packages: some bases (e.g. stereolabs/zed) pip-install under
+# a restrictive umask, leaving dist-packages entries `drwx------ root`. Any
+# non-root runtime UID then hits EACCES the moment setuptools/pkg_resources
+# scans sys.path, which makes colcon fail on every Python package.
+RUN for d in /usr/local/lib/python3*/dist-packages /usr/local/lib/python3*/site-packages; do \\
+        [ -d "$d" ] && chmod -R go+rX "$d"; done; true
+
 # build/install/log are mounted as named volumes (see naming.py::volume_name),
 # not part of the workspace bind mount -- a fresh named volume is empty, and
 # Docker only inherits the *image's* permissions at that path into it on

@@ -5,6 +5,16 @@ See [GitHub Releases](https://github.com/alec-jensen/rosman/releases) for
 downloadable artifacts, and [docs/roadmap.md](docs/roadmap.md) for the
 full build/verification history behind each entry.
 
+## v0.5.1 — 2026-10-30
+
+### Fixed
+
+- `colcon build` no longer fails with `PermissionError` on bases whose
+  pip-installed packages are root-only (e.g. `stereolabs/zed`, which leaves
+  `/usr/local/lib/python3*/dist-packages` entries as `drwx------`). The image
+  now makes those directories world-readable, so any runtime UID can import
+  `setuptools`.
+
 ## v0.5.0 — 2026-09-29
 
 ### Added
